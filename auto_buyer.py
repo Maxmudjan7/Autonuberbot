@@ -298,3 +298,4 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     await status_callback(6, 6, "Tayyor", final_text, {"completed": True, "order_id": order_id})
     return True, "Muvaffaqiyatli yakunlandi!"
+

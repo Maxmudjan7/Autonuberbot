@@ -517,6 +517,7 @@ async function loadWithdrawals() {
 // Format card number on input
 document.addEventListener('DOMContentLoaded', () => {
     initUserData();
+    loadUserCards();
 
     const cardInput = document.getElementById('input-card-number');
     if (cardInput) {
@@ -526,4 +527,235 @@ document.addEventListener('DOMContentLoaded', () => {
             e.target.value = formatted;
         });
     }
+
+    const newPan = document.getElementById('new-card-pan');
+    if (newPan) {
+        newPan.addEventListener('input', (e) => {
+            let val = e.target.value.replace(/\D/g, '').substring(0, 16);
+            let formatted = val.match(/.{1,4}/g)?.join(' ') || val;
+            e.target.value = formatted;
+        });
+    }
+
+    const newExp = document.getElementById('new-card-exp');
+    if (newExp) {
+        newExp.addEventListener('input', (e) => {
+            let val = e.target.value.replace(/\D/g, '').substring(0, 4);
+            if (val.length >= 2) {
+                e.target.value = val.substring(0, 2) + '/' + val.substring(2);
+            } else {
+                e.target.value = val;
+            }
+        });
+    }
 });
+
+// ==========================================
+// KARTALAR VA AVTO-PREMIUM BOSHQARUVI
+// ==========================================
+
+let userCards = [];
+let autoStatusInterval = null;
+
+async function loadUserCards() {
+    try {
+        const uid = currentUser?.id || 0;
+        const res = await fetch(`/api/cards?user_id=${uid}`, { headers: getHeaders() });
+        const data = await res.json();
+        userCards = data.cards || [];
+        
+        const activeCard = userCards.find(c => c.status === 'active' && c.used_count < c.max_limit);
+        const cardTextEl = document.getElementById('ui-active-card-text');
+        if (cardTextEl) {
+            if (activeCard) {
+                cardTextEl.innerText = `${activeCard.masked_number} (${activeCard.used_count}/${activeCard.max_limit} ta)`;
+            } else if (userCards.length > 0) {
+                cardTextEl.innerText = "Barcha kartalar limiti to'lgan (3/3)";
+            } else {
+                cardTextEl.innerText = "Karta qo'shilmagan";
+            }
+        }
+        renderCardsModalList();
+    } catch (e) {
+        console.error("Cards load error:", e);
+    }
+}
+
+function renderCardsModalList() {
+    const listEl = document.getElementById('cards-modal-list');
+    if (!listEl) return;
+    if (userCards.length === 0) {
+        listEl.innerHTML = `<div class="text-xs text-slate-500 py-3 text-center">Saqlangan kartalar mavjud emas.</div>`;
+        return;
+    }
+    listEl.innerHTML = userCards.map(c => {
+        const isLimit = c.used_count >= c.max_limit;
+        return `
+            <div class="p-2.5 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-between">
+                <div>
+                    <span class="font-mono text-xs font-bold text-slate-200">${c.masked_number}</span>
+                    <span class="text-[10px] text-slate-400 block">${c.exp_month}/${c.exp_year} • Ishlatildi: <b class="${isLimit ? 'text-rose-400' : 'text-cyan-300'}">${c.used_count}/${c.max_limit}</b></span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md ${isLimit ? 'bg-rose-950/80 text-rose-300' : 'bg-emerald-950/80 text-emerald-300'}">
+                        ${isLimit ? "Limit to'ldi" : 'Faol'}
+                    </span>
+                    <button onclick="deleteCard(${c.id})" class="text-xs text-rose-400 hover:text-rose-300 px-1.5 py-0.5">🗑</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function openCardModal() {
+    haptic('light');
+    document.getElementById('cards-modal')?.classList.remove('hidden');
+    loadUserCards();
+}
+
+function closeCardModal() {
+    haptic('light');
+    document.getElementById('cards-modal')?.classList.add('hidden');
+}
+
+async function submitNewCard() {
+    const pan = document.getElementById('new-card-pan')?.value.replace(/\D/g, '') || '';
+    const exp = document.getElementById('new-card-exp')?.value.replace(/\D/g, '') || '';
+    const cvv = document.getElementById('new-card-cvv')?.value.replace(/\D/g, '') || '';
+
+    if (pan.length !== 16) {
+        showToast("Karta raqami 16 ta raqam bo'lishi kerak!", 'error');
+        return;
+    }
+    if (exp.length !== 4) {
+        showToast("Amal qilish muddati noto'g'ri (MM/YY)!", 'error');
+        return;
+    }
+    if (cvv.length !== 3) {
+        showToast("CVV kod 3 ta raqam bo'lishi kerak!", 'error');
+        return;
+    }
+
+    const month = exp.substring(0, 2);
+    const year = exp.substring(2, 4);
+
+    haptic('medium');
+    try {
+        const uid = currentUser?.id || 0;
+        const res = await fetch('/api/cards/add', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                user_id: uid,
+                card_number: pan,
+                exp_month: month,
+                exp_year: year,
+                cvv: cvv
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            haptic('success');
+            showToast("Karta saqlandi! ✅", 'success');
+            document.getElementById('new-card-pan').value = '';
+            document.getElementById('new-card-exp').value = '';
+            document.getElementById('new-card-cvv').value = '';
+            await loadUserCards();
+        } else {
+            showToast(data.error || "Xatolik!", 'error');
+        }
+    } catch (e) {
+        showToast("Server bilan aloqa yo'q!", 'error');
+    }
+}
+
+async function deleteCard(cardId) {
+    haptic('medium');
+    try {
+        const uid = currentUser?.id || 0;
+        await fetch('/api/cards/delete', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ user_id: uid, card_id: cardId })
+        });
+        showToast("Karta o'chirildi", 'info');
+        loadUserCards();
+    } catch (e) {}
+}
+
+async function startAutoBuy() {
+    const btn = document.getElementById('btn-auto-premium');
+    btn.disabled = true;
+    haptic('medium');
+
+    const uid = currentUser?.id || 0;
+    try {
+        const res = await fetch('/api/order/auto_buy', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ user_id: uid })
+        });
+        const data = await res.json();
+        if (data.success) {
+            haptic('success');
+            showToast("Avto-olish boshlandi! ⚡️");
+            document.getElementById('auto-buy-progress-card')?.classList.remove('hidden');
+            pollAutoStatus();
+        } else {
+            haptic('error');
+            if (data.needs_card) {
+                showToast(data.error || "Avval to'lov kartangizni qo'shing!", 'error');
+                openCardModal();
+            } else {
+                showToast(data.error || "Xatolik!", 'error');
+            }
+        }
+    } catch (e) {
+        showToast("Server bilan aloqa yo'q!", 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function pollAutoStatus() {
+    if (autoStatusInterval) clearInterval(autoStatusInterval);
+    const uid = currentUser?.id || 0;
+
+    const check = async () => {
+        try {
+            const res = await fetch(`/api/order/auto_status?user_id=${uid}`, { headers: getHeaders() });
+            const data = await res.json();
+            const cardEl = document.getElementById('auto-buy-progress-card');
+            const titleEl = document.getElementById('auto-step-title');
+            const counterEl = document.getElementById('auto-step-counter');
+            const barEl = document.getElementById('auto-step-bar');
+            const textEl = document.getElementById('auto-step-text');
+
+            if (!cardEl) return;
+            cardEl.classList.remove('hidden');
+
+            const pct = Math.max(10, Math.min(100, Math.round((data.step / (data.total_steps || 6)) * 100)));
+            if (barEl) barEl.style.width = `${pct}%`;
+            if (counterEl) counterEl.innerText = `${data.step || 1}/${data.total_steps || 6}`;
+            if (titleEl) titleEl.innerHTML = `<span class="animate-spin text-sm">⚙️</span> ${data.title || 'Jarayon bajarilmoqda...'}`;
+            if (textEl) textEl.innerHTML = data.text || '';
+
+            if (data.completed) {
+                clearInterval(autoStatusInterval);
+                haptic('success');
+                showToast("Telegram Premium faollashtirildi! 🎉", 'success');
+                loadUserCards();
+                if (typeof loadUserData === 'function') loadUserData();
+            } else if (data.error) {
+                clearInterval(autoStatusInterval);
+                haptic('error');
+                showToast(data.error, 'error');
+                loadUserCards();
+            }
+        } catch (e) {}
+    };
+
+    check();
+    autoStatusInterval = setInterval(check, 2000);
+}
+

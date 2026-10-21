@@ -289,6 +289,115 @@ async def api_withdrawals(request):
         })
     return json_response({"withdrawals": withdrawals})
 
+# ==========================================
+# WEB APP: KARTALAR VA AVTO-PREMIUM API
+# ==========================================
+
+auto_buy_statuses = {}
+
+async def api_get_cards(request):
+    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
+    try:
+        user_id = int(user_id_str)
+    except Exception:
+        user_id = config.ADMIN_ID
+    
+    rows = database.get_user_cards(user_id)
+    cards = []
+    for r in rows:
+        c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, st, is_def, dt = r
+        mask_num = f"**** {c_num[-4:]}" if len(c_num) >= 4 else "****"
+        cards.append({
+            "id": c_id,
+            "masked_number": mask_num,
+            "exp_month": exp_m,
+            "exp_year": exp_y,
+            "used_count": used_c,
+            "max_limit": max_l,
+            "status": st,
+            "is_default": bool(is_def)
+        })
+    return json_response({"cards": cards})
+
+async def api_add_card(request):
+    data = await request.json()
+    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+    card_number = str(data.get('card_number', ''))
+    exp_month = str(data.get('exp_month', ''))
+    exp_year = str(data.get('exp_year', ''))
+    cvv = str(data.get('cvv', ''))
+
+    clean_num = "".join(filter(str.isdigit, card_number))
+    if len(clean_num) != 16:
+        return json_response({"success": False, "error": "Karta raqami 16 ta raqam bo'lishi kerak!"})
+    if not exp_month or not exp_year or len(cvv) != 3:
+        return json_response({"success": False, "error": "Amal qilish muddati yoki CVV xato!"})
+
+    card_id = database.add_user_card(user_id, clean_num, exp_month, exp_year, cvv, max_limit=3)
+    return json_response({"success": True, "card_id": card_id})
+
+async def api_delete_card(request):
+    data = await request.json()
+    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+    card_id = int(data.get('card_id', 0))
+    database.delete_user_card(card_id, user_id)
+    return json_response({"success": True})
+
+async def api_auto_buy(request):
+    data = await request.json()
+    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+
+    active_card = database.get_active_card_for_user(user_id)
+    if not active_card:
+        user_cards = database.get_user_cards(user_id)
+        if user_cards:
+            return json_response({"success": False, "needs_card": True, "error": "Barcha kartalaringiz limiti to'lgan (3/3 ta). Yangi karta qo'shing!"})
+        return json_response({"success": False, "needs_card": True, "error": "Avval to'lov kartangizni qo'shing!"})
+
+    import auto_buyer
+
+    auto_buy_statuses[user_id] = {
+        "step": 1,
+        "total_steps": 6,
+        "title": "Boshlanmoqda",
+        "text": "Dillerdan yangi raqam so'ralmoqda...",
+        "extra": {},
+        "completed": False,
+        "error": None
+    }
+
+    async def web_status_callback(step_num, total_steps, title, text, extra):
+        auto_buy_statuses[user_id] = {
+            "step": step_num,
+            "total_steps": total_steps,
+            "title": title,
+            "text": text,
+            "extra": extra,
+            "completed": extra.get("completed", False),
+            "error": extra.get("error", None)
+        }
+
+    asyncio.create_task(auto_buyer.run_auto_purchase_flow(user_id, active_card, web_status_callback))
+    return json_response({"success": True, "message": "Avto-olish jarayoni boshlandi!"})
+
+async def api_auto_status(request):
+    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
+    try:
+        user_id = int(user_id_str)
+    except Exception:
+        user_id = config.ADMIN_ID
+    
+    st = auto_buy_statuses.get(user_id, {
+        "step": 0,
+        "total_steps": 6,
+        "title": "Kutilmoqda",
+        "text": "Faol avto jarayon yo'q",
+        "extra": {},
+        "completed": False,
+        "error": None
+    })
+    return json_response(st)
+
 def create_webapp_app():
     app = web.Application()
 
@@ -311,6 +420,13 @@ def create_webapp_app():
     app.router.add_get('/api/history', api_history)
     app.router.add_post('/api/withdraw', api_withdraw)
     app.router.add_get('/api/withdrawals', api_withdrawals)
+
+    # Cards & Auto-Buy APIs
+    app.router.add_get('/api/cards', api_get_cards)
+    app.router.add_post('/api/cards/add', api_add_card)
+    app.router.add_post('/api/cards/delete', api_delete_card)
+    app.router.add_post('/api/order/auto_buy', api_auto_buy)
+    app.router.add_get('/api/order/auto_status', api_auto_status)
 
     return app
 

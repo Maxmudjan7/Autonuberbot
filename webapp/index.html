@@ -495,17 +495,49 @@
                 </div>
             </div>
 
-            <!-- GET NUMBER MAIN BUTTON WITH LIQUID BLUE GLASS ICON -->
-            <div id="get-number-box" class="pt-2">
-                <button id="btn-main-get-number" onclick="requestNumber()" class="w-full py-5 px-6 rounded-3xl btn-liquid-primary text-white font-black text-lg tracking-wide flex items-center justify-center gap-3.5 glow-pulse-cyan">
-                    <div class="w-9 h-9 rounded-2xl liquid-blue-icon bg-white/20 border-white/40 text-white shadow-lg">
-                        <svg class="w-5 h-5 animate-bounce" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+            <!-- ACTIVE PAYMENT CARD FOR AUTO-PREMIUM -->
+            <div class="liquid-glass rounded-3xl p-4 flex items-center justify-between border border-cyan-500/20 shadow-lg">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl liquid-blue-icon flex items-center justify-center font-bold text-lg">💳</div>
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-bold uppercase tracking-wider">To'lov kartasi (Avto-Premium)</div>
+                        <div id="ui-active-card-text" class="text-xs font-black text-cyan-300 font-mono">Karta yuklanmoqda...</div>
                     </div>
-                    <span>Number Olish</span>
+                </div>
+                <button onclick="openCardModal()" class="py-2 px-3.5 rounded-xl btn-liquid-glass text-xs font-bold text-cyan-300 hover:text-white transition">
+                    Kartalarim ⚙️
                 </button>
-                <div class="flex items-center justify-center gap-2 mt-3 text-xs text-slate-400">
+            </div>
+
+            <!-- AUTO BUY PROGRESS CARD (HIDDEN BY DEFAULT) -->
+            <div id="auto-buy-progress-card" class="hidden liquid-glass rounded-3xl p-5 border border-cyan-400/40 space-y-3.5 glow-pulse-cyan">
+                <div class="flex items-center justify-between">
+                    <span id="auto-step-title" class="text-xs font-black uppercase tracking-wider text-cyan-300 flex items-center gap-2">
+                        <span class="animate-spin text-sm">⚙️</span> Jarayon bajarilmoqda...
+                    </span>
+                    <span id="auto-step-counter" class="text-xs font-mono font-bold text-slate-400">1/6</span>
+                </div>
+                <div class="w-full bg-slate-800/80 rounded-full h-2 overflow-hidden">
+                    <div id="auto-step-bar" class="h-full bg-gradient-to-r from-sky-400 to-cyan-300 transition-all duration-500" style="width: 16%"></div>
+                </div>
+                <p id="auto-step-text" class="text-xs text-slate-300 leading-relaxed font-medium">Dillerdan raqam so'ralmoqda...</p>
+            </div>
+
+            <!-- GET NUMBER MAIN BUTTON WITH LIQUID BLUE GLASS ICON -->
+            <div id="get-number-box" class="pt-2 space-y-2.5">
+                <button id="btn-auto-premium" onclick="startAutoBuy()" class="w-full py-5 px-6 rounded-3xl btn-liquid-primary text-white font-black text-lg tracking-wide flex items-center justify-center gap-3.5 glow-pulse-cyan">
+                    <div class="w-9 h-9 rounded-2xl liquid-blue-icon bg-white/20 border-white/40 text-white shadow-lg">
+                        <span class="text-xl">⚡️</span>
+                    </div>
+                    <span>Avto Premium Olish</span>
+                </button>
+                <button id="btn-main-get-number" onclick="requestNumber()" class="w-full py-3.5 px-6 rounded-2xl btn-liquid-glass text-slate-300 font-bold text-xs tracking-wide flex items-center justify-center gap-2">
+                    <span>📱</span>
+                    <span>Oddiy raqam olish (Qo'lda)</span>
+                </button>
+                <div class="flex items-center justify-center gap-2 mt-2 text-xs text-slate-400">
                     <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-                    <span>5 daqiqa vaqt • Mukofot:</span>
+                    <span>Avtomatik to'lov va faollashtirish • Mukofot:</span>
                     <b class="text-cyan-300 font-mono">40,000 so'm</b>
                 </div>
             </div>
@@ -701,6 +733,38 @@
             </button>
 
         </nav>
+    </div>
+
+    <!-- CARDS MANAGEMENT MODAL -->
+    <div id="cards-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+        <div class="liquid-glass rounded-3xl p-6 w-full max-w-sm space-y-4 border border-cyan-500/30 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
+                    <span>💳</span> To'lov kartalarim
+                </h3>
+                <button onclick="closeCardModal()" class="w-7 h-7 rounded-full bg-white/10 text-slate-300 flex items-center justify-center font-bold text-xs hover:bg-white/20">✕</button>
+            </div>
+            
+            <div class="text-[11px] text-slate-400">
+                1 ta kartadan ko'pi bilan 3 tagacha premium olish mumkin.
+            </div>
+
+            <div id="cards-modal-list" class="space-y-2 max-h-40 overflow-y-auto pr-1">
+                <!-- Cards injected here -->
+            </div>
+
+            <div class="pt-3 border-t border-white/10 space-y-2.5">
+                <h4 class="text-xs font-bold text-cyan-300">➕ Yangi karta qo'shish</h4>
+                <input id="new-card-pan" type="text" maxlength="19" placeholder="Karta raqami (16 ta raqam)" class="w-full py-2.5 px-3.5 rounded-xl bg-slate-900/90 border border-white/15 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+                <div class="grid grid-cols-2 gap-2">
+                    <input id="new-card-exp" type="text" maxlength="5" placeholder="MM/YY (masalan 12/28)" class="w-full py-2.5 px-3.5 rounded-xl bg-slate-900/90 border border-white/15 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+                    <input id="new-card-cvv" type="password" maxlength="3" placeholder="CVV (3 ta raqam)" class="w-full py-2.5 px-3.5 rounded-xl bg-slate-900/90 border border-white/15 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+                </div>
+                <button onclick="submitNewCard()" class="w-full py-3 rounded-2xl btn-liquid-primary text-xs font-bold text-white tracking-wide shadow-lg">
+                    Saqlash
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- APP SCRIPT -->

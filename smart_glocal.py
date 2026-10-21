@@ -119,3 +119,4 @@ def tokenize_card(payment_url: str, card_number: str, exp_month: str, exp_year: 
     except Exception as ex:
         logger.error(f"Smart Glocal tokenize xatosi: {ex}")
         return {"success": False, "error": f"Ulanish xatosi: {str(ex)}"}
+
