@@ -48,3 +48,4 @@ Yoki `ISHGA_TUSHIRISH.bat` faylini ishga tushiring.
 
 ## 🔒 Xavfsizlik
 Maxfiy ma'lumotlar (`.env`, `*.session`, `*.db`) `.gitignore` ga kiritilgan bo'lib, ommaviy repozitoriyga chiqib ketishdan himoyalangan.
+
