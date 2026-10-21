@@ -1,0 +1,31 @@
+# Muhit o'zgaruvchilari va maxfiy kalitlar
+.env
+.env.local
+.env.*.local
+
+# Telegram sessiya fayllari (shaxsiy akkaunt ma'lumotlari)
+*.session
+*.session-journal
+
+# Ma'lumotlar bazasi
+*.db
+*.sqlite
+*.sqlite3
+
+# Python kesh va kompilyatsiya fayllari
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Muharrir va tizim fayllari
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
