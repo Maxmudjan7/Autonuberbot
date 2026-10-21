@@ -51,16 +51,16 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     # 1. Diller botini aniqlash
     diller_bot = database.get_active_diller_bot()
     if not diller_bot:
-        await status_callback(0, 6, "Diller boti yo'q", "⚠️ Diller boti ulanmagan! Iltimos, admin bilan bog'laning.", {"error": "no_diller"})
+        await status_callback(0, 6, "Xizmat vaqtincha to'xtatilgan", "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring.", {"error": "service_unavailable"})
         return False, "Diller boti topilmadi"
 
-    await status_callback(1, 6, "Raqam olinmoqda", f"⏳ <b>{diller_bot}</b> diller botidan yangi raqam so'ralmoqda...", {})
+    await status_callback(1, 6, "Raqam qidirilmoqda", "⏳ <b>Yangi raqam qidirilmoqda...</b>\nIltimos, biroz kuting...", {})
 
     # Raqam so'rash
     phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
     if not phone:
-        await status_callback(0, 6, "Raqam kelmadi", f"❌ Diller botidan raqam olinmadi.\nIzoh: <i>{err}</i>", {"error": "no_number"})
-        return False, err
+        await status_callback(0, 6, "Bo'sh raqamlar yo'q", "❌ <b>Hozirda bo'sh raqamlar mavjud emas.</b>\n\nIltimos, birozdan so'ng qayta urinib ko'ring.", {"error": "no_number"})
+        return False, "Bo'sh raqamlar mavjud emas"
 
     order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
 
@@ -80,13 +80,13 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     except Exception as e:
         logger.error(f"Telegram kod so'rashda xatolik: {e}")
         await temp_client.disconnect()
-        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi: {e}", {"error": str(e)})
+        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e)})
         return False, str(e)
 
     # 3. Diller botidan Get Code orqali kodni olish
     await status_callback(
-        3, 6, "Dillerdan kod kutilmoqda",
-        f"📱 Raqam: <code>+{phone}</code>\n⏳ Diller botidan SMS login kodi kutilmoqda (Get Code)...",
+        3, 6, "Tasdiqlash kodi kutilmoqda",
+        f"📱 <b>Raqam:</b> <code>+{phone}</code>\n⏳ Telegram tasdiqlash kodi kutilmoqda...",
         {"phone": phone}
     )
 
@@ -109,7 +109,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         # Raqamni muzlatish yoki bekor qilish
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         database.update_order_status(order_id, 'frozen')
-        await status_callback(0, 6, "Kod kelmadi", f"❌ <b>+{phone}</b> raqamiga dillerdan kod kelmadi. Raqam qaytarildi.", {"error": "no_code"})
+        await status_callback(0, 6, "Kod kelmadi", f"❌ <b>+{phone}</b> raqamiga tasdiqlash kodi kelmadi. Raqam bekor qilindi.", {"error": "no_code"})
         return False, "Kod kelmadi"
 
     database.update_order_status(order_id, 'active', code=auth_code, password=auth_password)
@@ -290,7 +290,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         f"📞 <b>Raqam:</b> <code>+{phone}</code>\n"
         f"⭐ <b>Telegram Premium:</b> Faollashtirildi ✅\n"
         f"🛑 <b>Avto-uzaytirish:</b> Bekor qilindi (/stop) ✅\n"
-        f"🤖 <b>Diller boti:</b> Tasdiqlandi ({diller_bot}) ✅\n"
+        f"⚡️ <b>Tizim tekshiruvi:</b> Muvaffaqiyatli tasdiqlandi ✅\n"
         f"💳 <b>Karta:</b> {mask_card} (Ishlatildi: {used_count + 1}/{max_limit})\n"
     )
     if limit_reached:

@@ -137,7 +137,7 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
         try:
             entity = await c.get_input_entity(diller_username)
         except (UsernameNotOccupiedError, UsernameInvalidError, ValueError):
-            return None, None, f"«{diller_username}» nomli Telegram bot topilmadi! Diller bot username to'g'riligini tekshiring."
+            return None, None, "Raqam beruvchi xizmat topilmadi."
 
         sent_msg = await c.send_message(entity, command)
 
@@ -162,7 +162,7 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
                         phone = match_all.group(1).replace("+", "").strip()
                         return phone, msg.id, None
 
-        return None, None, f"«{diller_username}» botidan raqam kelmadi yoki diller javob bermadi."
+        return None, None, "Hozirda bo'sh raqamlar mavjud emas."
     except Exception as e:
         logger.error(f"Diller botdan raqam olishda xatolik: {e}")
         return None, None, f"Xatolik: {str(e)}"

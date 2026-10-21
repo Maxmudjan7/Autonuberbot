@@ -113,11 +113,11 @@ async def api_get_number(request):
 
     diller_bot = database.get_active_diller_bot()
     if not diller_bot:
-        return json_response({"success": False, "error": "Diller boti ulanmagan yoki faol emas!"})
+        return json_response({"success": False, "error": "Hozirda raqam olish xizmati vaqtincha to'xtatilgan."})
 
     phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
     if not phone:
-        return json_response({"success": False, "error": err or "Bo'sh raqamlar mavjud emas!"})
+        return json_response({"success": False, "error": "Hozirda bo'sh raqamlar mavjud emas!"})
 
     order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
 
