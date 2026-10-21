@@ -16,3 +16,4 @@ echo        YANGILANISHLAR GITHUB'GA YUKLANDI!
 echo ========================================================
 echo.
 pause
+

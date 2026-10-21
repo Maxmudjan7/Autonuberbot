@@ -21,6 +21,7 @@ from aiogram.fsm.context import FSMContext
 import config
 import database
 import userbot
+import auto_buyer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,12 @@ dp = Dispatcher()
 
 # Faol taymer vazifalari (order_id -> asyncio.Task)
 active_timers = {}
+
+# Foydalanuvchi kartalari FSM
+class CardStates(StatesGroup):
+    waiting_card_number = State()
+    waiting_card_exp = State()
+    waiting_card_cvv = State()
 
 # Admin FSM holatlari
 class AdminStates(StatesGroup):
@@ -68,11 +75,14 @@ def get_user_inline_keyboard():
         ])
     rows.extend([
         [
-            InlineKeyboardButton(text="Number olish", callback_data="user_get_number", style="primary", icon_custom_emoji_id="5407025283456835913"),
-            InlineKeyboardButton(text="Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150")
+            InlineKeyboardButton(text="📱 Number olish (Avto)", callback_data="user_get_number", style="primary", icon_custom_emoji_id="5407025283456835913"),
+            InlineKeyboardButton(text="💳 Mening kartalarim", callback_data="user_my_cards", style="success", icon_custom_emoji_id="5190953888341046662")
         ],
         [
-            InlineKeyboardButton(text="Statistikam", callback_data="user_stats", style="primary", icon_custom_emoji_id="5431577498364158238"),
+            InlineKeyboardButton(text="Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150"),
+            InlineKeyboardButton(text="Statistikam", callback_data="user_stats", style="primary", icon_custom_emoji_id="5431577498364158238")
+        ],
+        [
             InlineKeyboardButton(text="Tarixim", callback_data="user_history", style="primary", icon_custom_emoji_id="5440621591387980068")
         ],
         [
@@ -330,7 +340,154 @@ async def run_order_timer(chat_id: int, message_id: int, order_id: int, phone: s
         except Exception:
             pass
 
+# ==========================================
+# FOYDALANUVCHI KARTALARI BOSHQARUVI
+# ==========================================
+
+@dp.callback_query(F.data == "user_my_cards")
+async def show_user_cards_menu(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    cards = database.get_user_cards(user_id)
+    
+    text = (
+        "💳 <b>Mening to'lov kartalarim</b>\n\n"
+        "Ushbu kartalar @PremiumBot orqali Telegram Premium'ni avtomatik sotib olish uchun ishlatiladi.\n"
+        "⚠️ <i>Xavfsizlik qoidasi: 1 ta kartadan ko'pi bilan 3 tagacha premium olish mumkin.</i>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    
+    keyboard_buttons = []
+    if not cards:
+        text += "<i>Hozircha saqlangan kartalaringiz yo'q.</i>\n"
+    else:
+        for idx, c in enumerate(cards, 1):
+            c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, c_status, is_def, _ = c
+            mask_num = f"**** {c_num[-4:]}" if len(c_num) >= 4 else "****"
+            def_str = " (Asosiy ⭐️)" if is_def else ""
+            status_icon = "✅ Faol" if c_status == 'active' and used_c < max_l else "❌ Limit to'lgan"
+            text += (
+                f"<b>{idx}. 💳 {mask_num}</b>{def_str}\n"
+                f"   • Muddati: {exp_m}/{exp_y}\n"
+                f"   • Ishlatildi: <b>{used_c}/{max_l} ta</b>\n"
+                f"   • Holati: {status_icon}\n\n"
+            )
+            keyboard_buttons.append([
+                InlineKeyboardButton(text=f"🗑 {mask_num} ni o'chirish", callback_data=f"del_card_{c_id}")
+            ])
+
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="➕ Yangi karta qo'shish", callback_data="add_new_card", style="success")
+    ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu", style="primary")
+    ])
+
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+
+@dp.callback_query(F.data == "add_new_card")
+async def start_add_card_flow(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(CardStates.waiting_card_number)
+    text = (
+        "💳 <b>Yangi to'lov kartasini qo'shish</b>\n\n"
+        "Iltimos, kartangizning <b>16 xonali raqamini</b> yuboring:\n"
+        "<i>(Masalan: 4292 1500 0000 0000)</i>\n\n"
+        "💡 <b>Tavsiya etiladi:</b> Anorbank, TBC, Kapitalbank virtual Visa/Mastercard kartalari."
+    )
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Bekor qilish", callback_data="cancel_card_add")]
+    ])
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=cancel_kb)
+
+@dp.callback_query(F.data == "cancel_card_add")
+async def cancel_card_add_cb(call: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await show_user_cards_menu(call)
+
+@dp.message(CardStates.waiting_card_number)
+async def process_card_number_input(message: types.Message, state: FSMContext):
+    clean_num = "".join(filter(str.isdigit, message.text or ""))
+    if len(clean_num) != 16:
+        await message.answer("❌ <b>Karta raqami noto'g'ri!</b>\n16 ta raqam bo'lishi kerak. Qaytadan kiriting:")
+        return
+
+    await state.update_data(card_number=clean_num)
+    await state.set_state(CardStates.waiting_card_exp)
+    await message.answer(
+        "📅 <b>Kartaning amal qilish muddatini kiriting:</b>\n"
+        "<i>(Masalan: 12/28 yoki 1228)</i>"
+    )
+
+@dp.message(CardStates.waiting_card_exp)
+async def process_card_exp_input(message: types.Message, state: FSMContext):
+    raw = message.text.replace("/", "").replace(" ", "").strip()
+    digits = "".join(filter(str.isdigit, raw))
+    if len(digits) != 4:
+        await message.answer("❌ <b>Format noto'g'ri!</b>\nOy va yilni 4 ta raqam shaklida kiriting (masalan: 12/28):")
+        return
+
+    month = digits[:2]
+    year = digits[2:]
+    if int(month) < 1 or int(month) > 12:
+        await message.answer("❌ <b>Oy noto'g'ri (01 dan 12 gacha)!</b> Qaytadan kiriting:")
+        return
+
+    await state.update_data(exp_month=month, exp_year=year)
+    await state.set_state(CardStates.waiting_card_cvv)
+    await message.answer(
+        "🔐 <b>Kartaning orqa tomonidagi 3 xonali CVV/CVC kodini kiriting:</b>\n"
+        "<i>(Masalan: 123)</i>"
+    )
+
+@dp.message(CardStates.waiting_card_cvv)
+async def process_card_cvv_input(message: types.Message, state: FSMContext):
+    cvv = "".join(filter(str.isdigit, message.text or "")).strip()
+    if len(cvv) != 3:
+        await message.answer("❌ <b>CVV kod 3 ta raqam bo'lishi kerak!</b> Qaytadan kiriting:")
+        return
+
+    data = await state.get_data()
+    card_number = data["card_number"]
+    exp_month = data["exp_month"]
+    exp_year = data["exp_year"]
+
+    card_id = database.add_user_card(
+        user_id=message.from_user.id,
+        card_number=card_number,
+        exp_month=exp_month,
+        exp_year=exp_year,
+        cvv=cvv,
+        max_limit=3
+    )
+    await state.clear()
+
+    mask_num = f"**** {card_number[-4:]}"
+    success_text = (
+        f"✅ <b>Karta muvaffaqiyatli saqlandi!</b>\n\n"
+        f"💳 <b>Karta:</b> {mask_num}\n"
+        f"📅 <b>Muddati:</b> {exp_month}/{exp_year}\n"
+        f"⭐️ <b>Limit:</b> 3 tagacha premium olish mumkin\n\n"
+        f"Endi «📱 Number olish (Avto)» tugmasini bosishingiz mumkin!"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Number olish (Avto)", callback_data="user_get_number", style="primary")],
+        [InlineKeyboardButton(text="💳 Kartalarim", callback_data="user_my_cards", style="success")],
+        [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
+    ])
+    await message.answer(success_text, parse_mode="HTML", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("del_card_"))
+async def delete_card_cb(call: types.CallbackQuery):
+    card_id = int(call.data.split("_")[2])
+    database.delete_user_card(card_id, call.from_user.id)
+    await call.answer("Karta o'chirildi! 🗑", show_alert=True)
+    await show_user_cards_menu(call)
+
+# ==========================================
+# AVTO-NUMBER VA PREMIUM OLISH
+# ==========================================
+
 @dp.callback_query(F.data == "user_get_number")
+@dp.message(F.text == "📱 Number olish (Avto)")
 @dp.message(F.text == "📱 Number olish")
 @dp.message(Command("getNumber"))
 async def handle_get_number(event: types.Message | types.CallbackQuery):
@@ -351,58 +508,67 @@ async def handle_get_number(event: types.Message | types.CallbackQuery):
             await event.answer(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
         return
 
-    diller_bot = database.get_active_diller_bot()
-    if not diller_bot:
-        if database.is_admin(user_id, config.ADMIN_ID):
-            msg_text = (
-                "⚠️ <b>Diller boti ulanmagan!</b>\n\n"
-                "Admin paneliga kirib «🤖 Any botlar» orqali diller bot username'ini qo'shing."
+    # Faol to'lov kartasini tekshirish
+    active_card = database.get_active_card_for_user(user_id)
+    if not active_card:
+        user_cards = database.get_user_cards(user_id)
+        if user_cards:
+            text = (
+                "⚠️ <b>Barcha saqlangan kartalaringiz limiti to'lgan (3/3 ta)!</b>\n\n"
+                "Telegram va to'lov xavfsizligi uchun 1 ta kartadan ko'pi bilan 3 ta premium olib bo'ladi.\n"
+                "Iltimos, «💳 Mening kartalarim» bo'limidan yangi karta qo'shing."
             )
         else:
-            msg_text = "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring."
-
+            text = (
+                "💳 <b>Avval to'lov kartangizni qo'shing!</b>\n\n"
+                "Bot avtomatik tarzda @PremiumBot ga ulanib, to'lovni o'zi bajarishi uchun kartangiz kerak bo'ladi.\n"
+                "<i>(1 ta kartadan 3 martagacha premium olish mumkin. Virtual Visa/Mastercard tavsiya etiladi).</i>"
+            )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Karta qo'shish", callback_data="add_new_card", style="success")],
+            [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
+        ])
         if is_callback:
-            await event.message.edit_text(msg_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         else:
-            await event.answer(msg_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.answer(text, parse_mode="HTML", reply_markup=kb)
         return
 
+    card_num = active_card[1]
+    mask_num = f"**** {card_num[-4:]}"
+    used_c = active_card[5]
+    max_l = active_card[6]
+
+    start_text = (
+        f"🚀 <b>Avto-Premium jarayoni boshlanmoqda...</b>\n\n"
+        f"💳 <b>To'lov kartasi:</b> <code>{mask_num}</code> (Ishlatildi: {used_c}/{max_l})\n"
+        f"⏳ Iltimos kuting, dillerdan raqam so'ralmoqda..."
+    )
     if is_callback:
-        wait_msg = await event.message.edit_text("⏳ <b>Raqam olinmoqda, iltimos kuting...</b>", parse_mode="HTML")
+        status_msg = await event.message.edit_text(start_text, parse_mode="HTML")
     else:
-        wait_msg = await event.answer("⏳ <b>Raqam olinmoqda, iltimos kuting...</b>", parse_mode="HTML")
+        status_msg = await event.answer(start_text, parse_mode="HTML")
 
-    phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
+    async def update_status(step_num: int, total_steps: int, title: str, text: str, extra: dict):
+        step_header = f"[{step_num}/{total_steps}]" if step_num > 0 else "⚠️"
+        full_text = f"⚡️ <b>AVTO-PREMIUM {step_header}</b>\n\n{text}"
+        
+        kb = None
+        if extra.get("error") or extra.get("completed"):
+            kb = get_back_to_menu_keyboard()
+        elif extra.get("needs_sms") and extra.get("verification_url"):
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
+                [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
+            ])
 
-    if not phone:
-        if database.is_admin(user_id, config.ADMIN_ID):
-            await wait_msg.edit_text(f"❌ <b>Raqam olishda xatolik!</b>\n\nIzoh: <i>{err}</i>", parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
-        else:
-            await wait_msg.edit_text("❌ <b>Hozirda bo'sh raqamlar mavjud emas.</b>\n\nIltimos, birozdan so'ng qayta urinib ko'ring.", parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
-        return
+        try:
+            await status_msg.edit_text(full_text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
 
-    order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
+    asyncio.create_task(auto_buyer.run_auto_purchase_flow(user_id, active_card, update_status))
 
-    # Kanalga number log yuborish
-    user_disp = event.from_user.full_name or (f"@{event.from_user.username}" if event.from_user.username else str(user_id))
-    asyncio.create_task(send_channel_number_log(user_id, user_disp, phone, diller_bot))
-
-    pbar = render_progress_bar(300, 300)
-    text = (
-        f"📱 <b>Sizning numberingiz:</b>\n\n"
-        f"📞 <b>Number:</b> <code>{phone}</code>\n\n"
-        f"⏱ <b>Qolgan vaqt:</b> 00:04:59 [{pbar}]\n\n"
-        f"📨 Code olish uchun «Get Code» tugmasini bosing!\n"
-        f"🧊 Raqam ishlamasa — numberni muzlatish\n"
-        f"⚠️ <i>5 daqiqa ichida bosilmasa raqam qaytariladi</i>"
-    )
-
-    await wait_msg.edit_text(text, parse_mode="HTML", reply_markup=get_order_keyboard(order_id))
-
-    timer_task = asyncio.create_task(
-        run_order_timer(wait_msg.chat.id, wait_msg.message_id, order_id, phone, total_seconds=300)
-    )
-    active_timers[order_id] = timer_task
 
 @dp.callback_query(F.data.startswith("get_code_"))
 async def handle_callback_get_code(call: types.CallbackQuery):

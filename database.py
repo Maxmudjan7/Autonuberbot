@@ -104,6 +104,24 @@ def init_db():
         )
     ''')
 
+    # Foydalanuvchi to'lov kartalari jadvali (Telegram Premium uchun)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            card_number TEXT,
+            exp_month TEXT,
+            exp_year TEXT,
+            cvv TEXT,
+            used_count INTEGER DEFAULT 0,
+            max_limit INTEGER DEFAULT 3,
+            status TEXT DEFAULT 'active',
+            is_default INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    ''')
+
     # Adminlar jadvali
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS admins (
@@ -767,3 +785,85 @@ def get_user_withdrawals(user_id: int):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+# ==========================================
+# FOYDALANUVCHI KARTALARI (PREMIUM TO'LOV)
+# ==========================================
+
+def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str, cvv: str, max_limit: int = 3):
+    clean_number = "".join(filter(str.isdigit, str(card_number)))
+    clean_month = str(exp_month).zfill(2)
+    clean_year = str(exp_year)[-2:] if len(str(exp_year)) >= 2 else str(exp_year)
+    clean_cvv = str(cvv).strip()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM user_cards WHERE user_id = ? AND is_default = 1", (user_id,))
+    has_default = cursor.fetchone()
+    is_default = 0 if has_default else 1
+
+    cursor.execute('''
+        INSERT INTO user_cards (user_id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default)
+        VALUES (?, ?, ?, ?, ?, 0, ?, 'active', ?)
+    ''', (user_id, clean_number, clean_month, clean_year, clean_cvv, max_limit, is_default))
+    card_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return card_id
+
+def get_user_cards(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default, created_at
+        FROM user_cards
+        WHERE user_id = ?
+        ORDER BY is_default DESC, id DESC
+    ''', (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_active_card_for_user(user_id: int):
+    """Foydalanuvchining limiti to'lmagan (used_count < max_limit) faol kartasini qaytaradi"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default
+        FROM user_cards
+        WHERE user_id = ? AND status = 'active' AND used_count < max_limit
+        ORDER BY is_default DESC, id ASC LIMIT 1
+    ''', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def increment_card_usage(card_id: int):
+    """Karta ishlatilganlik hisoblagichini oshiradi. 3 taga yetsa status='limit_reached' bo'ladi"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE user_cards SET used_count = used_count + 1 WHERE id = ?", (card_id,))
+    cursor.execute("SELECT used_count, max_limit, user_id FROM user_cards WHERE id = ?", (card_id,))
+    row = cursor.fetchone()
+    limit_reached = False
+    if row and row[0] >= row[1]:
+        cursor.execute("UPDATE user_cards SET status = 'limit_reached' WHERE id = ?", (card_id,))
+        limit_reached = True
+    conn.commit()
+    conn.close()
+    return limit_reached
+
+def delete_user_card(card_id: int, user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
+    conn.commit()
+    conn.close()
+
+def set_default_card(card_id: int, user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE user_cards SET is_default = 0 WHERE user_id = ?", (user_id,))
+    cursor.execute("UPDATE user_cards SET is_default = 1 WHERE id = ? AND user_id = ?", (card_id, user_id))
+    conn.commit()
+    conn.close()
