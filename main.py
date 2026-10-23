@@ -67,7 +67,7 @@ def get_user_inline_keyboard():
         from aiogram.types import WebAppInfo
         rows.append([
             InlineKeyboardButton(
-                text="🚀 Ilovani ochish (Mini App)",
+                text="Ilovani ochish (Mini App)",
                 web_app=WebAppInfo(url=webapp_url),
                 style="success",
                 icon_custom_emoji_id="5839394435644788150"
@@ -75,12 +75,12 @@ def get_user_inline_keyboard():
         ])
     rows.extend([
         [
-            InlineKeyboardButton(text="⚡️ Avto olish (Robot)", callback_data="user_get_number_auto", style="primary", icon_custom_emoji_id="5407025283456835913"),
-            InlineKeyboardButton(text="📱 Qo'lda olish (Manual)", callback_data="user_get_number_manual", style="primary", icon_custom_emoji_id="5427009714745517609")
+            InlineKeyboardButton(text="Avto olish (Robot)", callback_data="user_get_number_auto", style="primary", icon_custom_emoji_id="5407025283456835913"),
+            InlineKeyboardButton(text="Qo'lda olish (Manual)", callback_data="user_get_number_manual", style="primary", icon_custom_emoji_id="5427009714745517609")
         ],
         [
-            InlineKeyboardButton(text="💳 Mening kartalarim", callback_data="user_my_cards", style="success", icon_custom_emoji_id="5190953888341046662"),
-            InlineKeyboardButton(text="⭐ Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150")
+            InlineKeyboardButton(text="Mening kartalarim", callback_data="user_my_cards", style="success", icon_custom_emoji_id="5190953888341046662"),
+            InlineKeyboardButton(text="Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150")
         ],
         [
             InlineKeyboardButton(text="Statistikam", callback_data="user_stats", style="primary", icon_custom_emoji_id="5431577498364158238"),
