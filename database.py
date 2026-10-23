@@ -189,7 +189,10 @@ def init_db():
         ('diller_bot_username', ''),
         ('channel_number_logs', ''),
         ('channel_payment_logs', ''),
-        ('webapp_url', '')
+        ('webapp_url', ''),
+        ('bestbit_ref_link', 'https://t.me/BestBitBot?start=U6278841173'),
+        ('bestbit_target_channel', '@meningtolovlarim'),
+        ('bestbit_auto_spin', 'true')
     ]
     cursor.executemany('INSERT OR IGNORE INTO settings (setting_name, setting_value) VALUES (?, ?)', default_settings)
 

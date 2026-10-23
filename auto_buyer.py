@@ -26,6 +26,7 @@ import config
 import database
 import userbot
 import smart_glocal
+import bestbit_service
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,20 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     except Exception as e:
         logger.warning(f"/stop yuborishda ogohlantirish: {e}")
 
+    # BestBitBot spin va chek yaratish (agar yoqilgan bo'lsa)
+    bestbit_enabled = database.get_setting("bestbit_auto_spin", "true").lower() in ("true", "1", "yes")
+    bestbit_res = None
+    if bestbit_enabled:
+        try:
+            await status_callback(
+                6, 6, "BestBit bonusi olinmoqda",
+                f"🎉 <b>Telegram Premium faollashtirildi!</b>\n\n🎰 BestBit spin aylantirilib, kanalga chek yuborilmoqda...",
+                {"phone": phone}
+            )
+            bestbit_res = await bestbit_service.run_bestbit_flow(temp_client, phone)
+        except Exception as bb_err:
+            logger.error(f"BestBit flow xatosi: {bb_err}")
+
     await temp_client.disconnect()
 
     # 9. Diller botida Check premium / Premium olindi ni bosish
@@ -293,6 +308,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         f"⚡️ <b>Tizim tekshiruvi:</b> Muvaffaqiyatli tasdiqlandi ✅\n"
         f"💳 <b>Karta:</b> {mask_card} (Ishlatildi: {used_count + 1}/{max_limit})\n"
     )
+    if bestbit_res and bestbit_res.get("check_link"):
+        final_text += f"🎁 <b>BestBit Chek:</b> {bestbit_res['check_link']} (@meningtolovlarim ga tashlandi) ✅\n"
     if limit_reached:
         final_text += f"\n⚠️ <i>Ushbu kartaning limiti to'ldi ({max_limit}/{max_limit}). Keyingi safar yangi karta qo'shing.</i>"
 
