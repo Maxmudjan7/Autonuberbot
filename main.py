@@ -75,14 +75,15 @@ def get_user_inline_keyboard():
         ])
     rows.extend([
         [
-            InlineKeyboardButton(text="📱 Number olish (Avto)", callback_data="user_get_number", style="primary", icon_custom_emoji_id="5407025283456835913"),
-            InlineKeyboardButton(text="💳 Mening kartalarim", callback_data="user_my_cards", style="success", icon_custom_emoji_id="5190953888341046662")
+            InlineKeyboardButton(text="⚡️ Avto olish (Robot)", callback_data="user_get_number_auto", style="primary", icon_custom_emoji_id="5407025283456835913"),
+            InlineKeyboardButton(text="📱 Qo'lda olish (Manual)", callback_data="user_get_number_manual", style="primary", icon_custom_emoji_id="5427009714745517609")
         ],
         [
-            InlineKeyboardButton(text="Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150"),
-            InlineKeyboardButton(text="Statistikam", callback_data="user_stats", style="primary", icon_custom_emoji_id="5431577498364158238")
+            InlineKeyboardButton(text="💳 Mening kartalarim", callback_data="user_my_cards", style="success", icon_custom_emoji_id="5190953888341046662"),
+            InlineKeyboardButton(text="⭐ Premiumlarim", callback_data="user_premiums", style="success", icon_custom_emoji_id="5839394435644788150")
         ],
         [
+            InlineKeyboardButton(text="Statistikam", callback_data="user_stats", style="primary", icon_custom_emoji_id="5431577498364158238"),
             InlineKeyboardButton(text="Tarixim", callback_data="user_history", style="primary", icon_custom_emoji_id="5440621591387980068")
         ],
         [
@@ -96,20 +97,17 @@ def get_user_inline_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_welcome_text(full_name: str, premiums: int):
+    reward_val = database.get_setting("reward_per_account", "40,000")
     return (
         f"<tg-emoji emoji-id='5204340545488428414'>👋</tg-emoji> Xush kelibsiz, <b>{full_name}</b>!\n\n"
         f"<tg-emoji emoji-id='5839394435644788150'>⭐</tg-emoji> Premiumlar: <b>{premiums} ta</b>\n"
+        f"💰 Mukofot: <b>{reward_val} so'm</b> / har bir premium uchun\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<tg-emoji emoji-id='5407025283456835913'>📱</tg-emoji> <b>Bu bot nima qiladi?</b>\n\n"
-        f"Telegram Premium obunasini olganingz uchun sizga pul to'laymiz.\n\n"
-        f"<tg-emoji emoji-id='5839394435644788150'>⭐</tg-emoji> Oylik Premium narxi: <b>40,000 so'm</b>\n"
+        f"🎯 <b>Bizda 2 xil olish usuli mavjud:</b>\n\n"
+        f"⚡️ <b>«Avto olish (Robot)»:</b> Kartangizni kiritasiz, bot hamma ishni o'zi avtomatik to'lab faollashtiradi!\n\n"
+        f"📱 <b>«Qo'lda olish (Manual)»:</b> Raqam va SMS kod olasiz, Telegram ilovangizda o'zingiz kirib premiumni faollashtirasiz va «Oldim»ni bosasiz!\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<tg-emoji emoji-id='5427009714745517609'>✅</tg-emoji> <b>Qanday ishlaydi?</b>\n"
-        f"<tg-emoji emoji-id='5382322671679708881'>1️⃣</tg-emoji> «Number olish» yoki /getNumber\n"
-        f"<tg-emoji emoji-id='5381990043642502553'>2️⃣</tg-emoji> «Get Code» bosib kodni oling\n"
-        f"<tg-emoji emoji-id='5381879959335738545'>3️⃣</tg-emoji> Shu raqam orqali premiumni faollashtiring\n"
-        f"<tg-emoji emoji-id='5382054253403577563'>4️⃣</tg-emoji> «Oldim» tugmasini bosing\n\n"
-        f"❓ Batafsil — «Qo'llanma» tugmasini bosing"
+        f"❓ Qo'shimcha ma'lumot — «Qo'llanma» tugmasida"
     )
 
 def get_back_to_menu_keyboard():
@@ -483,14 +481,13 @@ async def delete_card_cb(call: types.CallbackQuery):
     await show_user_cards_menu(call)
 
 # ==========================================
-# AVTO-NUMBER VA PREMIUM OLISH
+# 1. AVTO-NUMBER VA PREMIUM OLISH (ROBOT)
 # ==========================================
 
-@dp.callback_query(F.data == "user_get_number")
+@dp.callback_query(F.data == "user_get_number_auto")
+@dp.message(F.text == "⚡️ Avto olish (Robot)")
 @dp.message(F.text == "📱 Number olish (Avto)")
-@dp.message(F.text == "📱 Number olish")
-@dp.message(Command("getNumber"))
-async def handle_get_number(event: types.Message | types.CallbackQuery):
+async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
     user_id = event.from_user.id
     is_callback = isinstance(event, types.CallbackQuery)
     if not is_callback:
@@ -521,11 +518,12 @@ async def handle_get_number(event: types.Message | types.CallbackQuery):
         else:
             text = (
                 "💳 <b>Avval to'lov kartangizni qo'shing!</b>\n\n"
-                "Bot avtomatik tarzda @PremiumBot ga ulanib, to'lovni o'zi bajarishi uchun kartangiz kerak bo'ladi.\n"
+                "Robot orqali to'lovni avtomatik amalga oshirish uchun kartangiz kerak bo'ladi.\n"
                 "<i>(1 ta kartadan 3 martagacha premium olish mumkin. Virtual Visa/Mastercard tavsiya etiladi).</i>"
             )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="➕ Karta qo'shish", callback_data="add_new_card", style="success")],
+            [InlineKeyboardButton(text="📱 Qo'lda olishga o'tish", callback_data="user_get_number_manual", style="primary")],
             [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
         ])
         if is_callback:
@@ -542,7 +540,7 @@ async def handle_get_number(event: types.Message | types.CallbackQuery):
     start_text = (
         f"🚀 <b>Avto-Premium jarayoni boshlanmoqda...</b>\n\n"
         f"💳 <b>To'lov kartasi:</b> <code>{mask_num}</code> (Ishlatildi: {used_c}/{max_l})\n"
-        f"⏳ Iltimos kuting, dillerdan raqam so'ralmoqda..."
+        f"⏳ Iltimos kuting, yangi raqam qidirilmoqda..."
     )
     if is_callback:
         status_msg = await event.message.edit_text(start_text, parse_mode="HTML")
@@ -568,6 +566,83 @@ async def handle_get_number(event: types.Message | types.CallbackQuery):
             pass
 
     asyncio.create_task(auto_buyer.run_auto_purchase_flow(user_id, active_card, update_status))
+
+
+# ==========================================
+# 2. QO'LDA NUMBER VA PREMIUM OLISH (MANUAL)
+# ==========================================
+
+@dp.callback_query(F.data == "user_get_number_manual")
+@dp.callback_query(F.data == "user_get_number")
+@dp.message(F.text == "📱 Qo'lda olish (Manual)")
+@dp.message(F.text == "📱 Number olish")
+@dp.message(Command("getNumber"))
+async def handle_get_number_manual(event: types.Message | types.CallbackQuery):
+    user_id = event.from_user.id
+    is_callback = isinstance(event, types.CallbackQuery)
+    if not is_callback:
+        await cleanup_reply_keyboard(event)
+
+    active_order = database.get_active_order_for_user(user_id)
+    if active_order:
+        warn_text = (
+            f"⚠️ Sizda allaqachon faol raqam mavjud: <code>{active_order[2]}</code>\n"
+            f"Iltimos, avval ushbu raqamni yakunlang yoki bekor qiling."
+        )
+        if is_callback:
+            await event.message.edit_text(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        else:
+            await event.answer(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    diller_bot = database.get_active_diller_bot()
+    if not diller_bot:
+        msg_text = "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring."
+        if is_callback:
+            await event.message.edit_text(msg_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        else:
+            await event.answer(msg_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    if is_callback:
+        wait_msg = await event.message.edit_text("⏳ <b>Yangi raqam qidirilmoqda, iltimos kuting...</b>", parse_mode="HTML")
+    else:
+        wait_msg = await event.answer("⏳ <b>Yangi raqam qidirilmoqda, iltimos kuting...</b>", parse_mode="HTML")
+
+    phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
+
+    if not phone:
+        await wait_msg.edit_text(
+            "❌ <b>Hozirda bo'sh raqamlar mavjud emas.</b>\n\nIltimos, birozdan so'ng qayta urinib ko'ring.",
+            parse_mode="HTML",
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        return
+
+    order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
+
+    # Kanalga number log yuborish
+    user_disp = event.from_user.full_name or (f"@{event.from_user.username}" if event.from_user.username else str(user_id))
+    asyncio.create_task(send_channel_number_log(user_id, user_disp, phone, diller_bot))
+
+    pbar = render_progress_bar(300, 300)
+    text = (
+        f"📱 <b>Sizning numberingiz (Qo'lda olish):</b>\n\n"
+        f"📞 <b>Number:</b> <code>+{phone}</code>\n\n"
+        f"⏱ <b>Qolgan vaqt:</b> 00:04:59 [{pbar}]\n\n"
+        f"1️⃣ Telegram ilovangizda ushbu raqamga kiring.\n"
+        f"2️⃣ Kirish kodini olish uchun <b>«Get Code»</b> tugmasini bosing!\n"
+        f"3️⃣ Akkauntga kirgach, <b>@PremiumBot</b> orqali premiumni faollashtiring.\n"
+        f"4️⃣ Faollashtirgach <b>«Oldim»</b> tugmasini bosing!\n\n"
+        f"🧊 <i>Raqam ishlamasa — «Muzlatish» bosing.</i>"
+    )
+
+    await wait_msg.edit_text(text, parse_mode="HTML", reply_markup=get_order_keyboard(order_id))
+
+    timer_task = asyncio.create_task(
+        run_order_timer(wait_msg.chat.id, wait_msg.message_id, order_id, phone, total_seconds=300)
+    )
+    active_timers[order_id] = timer_task
 
 
 @dp.callback_query(F.data.startswith("get_code_"))
@@ -790,21 +865,26 @@ async def handle_withdraw_placeholder(event: types.Message | types.CallbackQuery
 async def handle_user_manual(event: types.Message | types.CallbackQuery):
     if isinstance(event, types.Message):
         await cleanup_reply_keyboard(event)
+    reward_val = database.get_setting("reward_per_account", "40,000")
     text = (
         "📖 <b>Qo'llanma</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "⭐️ <b>Premium narxi:</b> 40000 so'm/oy\n"
-        "💰 <b>Sizga beriladigan mukofot:</b> 40 so'm <i>(har bir premium uchun)</i>\n\n"
+        f"💰 <b>Sizga beriladigan mukofot:</b> {reward_val} so'm <i>(har bir premium uchun)</i>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "1️⃣ <b>Number olish</b>\n   • «📱 Number olish» yoki /getNumber\n   • Sizga telefon raqam beriladi\n\n"
-        "2️⃣ <b>Get Code</b>\n   • «📨 Get Code» tugmasini bosing\n   • Raqam, kod va parol ko'rsatiladi\n   • 🧊 Raqam ishlamasa — numberni muzlatish\n\n"
-        "3️⃣ <b>Premium faollashtirish</b>\n   • Telegram → Sozlamalar → Telegram Premium\n   • Berilgan raqam va kod bilan kiring\n   • Premiumni faollashtiring\n\n"
-        "4️⃣ <b>Tasdiqlash</b>\n   • «✅ Oldim» tugmasini bosing\n   • Premiumlar soni yangilanadi\n\n"
+        "⚡️ <b>1-USUL: Avto olish (Robot orqali)</b>\n"
+        "   1. «💳 Mening kartalarim» bo'limida kartangizni saqlang.\n"
+        "   2. «⚡️ Avto olish (Robot)» tugmasini bosing.\n"
+        "   3. Bot o'zi raqam oladi, kiradi va to'lovni avtomat bajaradi!\n"
+        "   4. 🛑 Premium olingach avto-uzaytirish bekor qilinadi (/stop).\n\n"
+        "📱 <b>2-USUL: Qo'lda olish (Manual)</b>\n"
+        "   1. «📱 Qo'lda olish (Manual)» tugmasini bosing.\n"
+        "   2. Berilgan telefon raqami bilan Telegram ilovangizda kiring.\n"
+        "   3. «📨 Get Code» bosib kod va 2FA parolni oling.\n"
+        "   4. Akkauntga kirgach, @PremiumBot orqali premiumni sotib oling.\n"
+        "   5. Premiumni sotib olgach, «✅ Oldim» tugmasini bosing!\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "⏰ Har bir raqam <b>1 soat active</b>\n"
-        "⚠️ 30 va 25 daqiqa qolganda ogohlantirish keladi\n"
-        "🧊 Raqam ishlamasa — numberni muzlatish\n"
-        "💸 Pul yechish — «💸 Pul yechish» tugmasi orqali"
+        "⚠️ <i>1 ta kartadan xavfsizlik uchun ko'pi bilan 3 ta premium olish tavsiya etiladi.</i>\n"
+        "💸 Pul yechish — «💸 Pul yechish» tugmasi orqali amalga oshiriladi."
     )
     if isinstance(event, types.CallbackQuery):
         await event.message.edit_text(text, parse_mode="HTML", reply_markup=get_manual_keyboard())
