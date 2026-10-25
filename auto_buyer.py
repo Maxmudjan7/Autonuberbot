@@ -209,12 +209,25 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         {"payment_url": payment_url}
     )
 
+    # Akkaunt nomini olish (Ism/Familiya - Customer info uchun)
+    full_acc_name = "Telegram User"
+    try:
+        me_acc = await temp_client.get_me()
+        first_n = getattr(me_acc, 'first_name', '') or ''
+        last_n = getattr(me_acc, 'last_name', '') or ''
+        comb_name = f"{first_n} {last_n}".strip()
+        if comb_name:
+            full_acc_name = comb_name
+    except Exception:
+        pass
+
     tok_res = smart_glocal.tokenize_card(
         payment_url=payment_url,
         card_number=card_number,
         exp_month=exp_month,
         exp_year=exp_year,
-        cvv=cvv
+        cvv=cvv,
+        cardholder_name=full_acc_name
     )
 
     if not tok_res.get("success"):
@@ -233,6 +246,23 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     token_type = tok_res.get("type", "card")
 
     # 7. Telegram Payment Formani tasdiqlash
+    # Agar Telegram to'lov formasi Customer Info (Full name) talab qilsa:
+    requested_info_id = None
+    try:
+        inv_obj = getattr(payment_form, 'invoice', None)
+        if inv_obj and getattr(inv_obj, 'name_requested', False):
+            from telethon.tl.functions.payments import ValidateRequestedInfoRequest
+            from telethon.tl.types import PaymentRequestedInfo
+            logger.info(f"Telegram to'lovi uchun ism-familiya avtomatik kiritilmoqda: '{full_acc_name}'")
+            val_res = await temp_client(ValidateRequestedInfoRequest(
+                invoice=input_inv,
+                info=PaymentRequestedInfo(name=full_acc_name),
+                save=True
+            ))
+            requested_info_id = getattr(val_res, 'id', None)
+    except Exception as name_err:
+        logger.warning(f"Ism-familiyani tasdiqlashda ogohlantirish: {name_err}")
+
     cred_data = json.dumps({"token": token, "type": token_type})
     credentials = InputPaymentCredentials(data=DataJSON(data=cred_data))
 
@@ -240,7 +270,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         pay_result = await temp_client(SendPaymentFormRequest(
             form_id=form_id,
             invoice=input_inv,
-            credentials=credentials
+            credentials=credentials,
+            requested_info_id=requested_info_id
         ))
         
         if isinstance(pay_result, PaymentVerificationNeeded):
