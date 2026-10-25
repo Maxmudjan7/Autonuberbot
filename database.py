@@ -117,10 +117,15 @@ def init_db():
             max_limit INTEGER DEFAULT 3,
             status TEXT DEFAULT 'active',
             is_default INTEGER DEFAULT 1,
+            cardholder_name TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
     ''')
+    cursor.execute("PRAGMA table_info(user_cards)")
+    card_columns = [col[1] for col in cursor.fetchall()]
+    if "cardholder_name" not in card_columns:
+        cursor.execute("ALTER TABLE user_cards ADD COLUMN cardholder_name TEXT DEFAULT ''")
 
     # Adminlar jadvali
     cursor.execute('''
@@ -793,11 +798,12 @@ def get_user_withdrawals(user_id: int):
 # FOYDALANUVCHI KARTALARI (PREMIUM TO'LOV)
 # ==========================================
 
-def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str, cvv: str, max_limit: int = 3):
+def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str, cvv: str, cardholder_name: str = "", max_limit: int = 3):
     clean_number = "".join(filter(str.isdigit, str(card_number)))
     clean_month = str(exp_month).zfill(2)
     clean_year = str(exp_year)[-2:] if len(str(exp_year)) >= 2 else str(exp_year)
     clean_cvv = str(cvv).strip()
+    clean_name = str(cardholder_name).strip()
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -806,9 +812,9 @@ def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str,
     is_default = 0 if has_default else 1
 
     cursor.execute('''
-        INSERT INTO user_cards (user_id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default)
-        VALUES (?, ?, ?, ?, ?, 0, ?, 'active', ?)
-    ''', (user_id, clean_number, clean_month, clean_year, clean_cvv, max_limit, is_default))
+        INSERT INTO user_cards (user_id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, status, is_default)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?)
+    ''', (user_id, clean_number, clean_month, clean_year, clean_cvv, clean_name, max_limit, is_default))
     card_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -818,7 +824,7 @@ def get_user_cards(user_id: int):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default, created_at
+        SELECT id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, status, is_default, created_at
         FROM user_cards
         WHERE user_id = ?
         ORDER BY is_default DESC, id DESC
@@ -832,7 +838,7 @@ def get_active_card_for_user(user_id: int):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, card_number, exp_month, exp_year, cvv, used_count, max_limit, status, is_default
+        SELECT id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, status, is_default
         FROM user_cards
         WHERE user_id = ? AND status = 'active' AND used_count < max_limit
         ORDER BY is_default DESC, id ASC LIMIT 1

@@ -305,11 +305,16 @@ async def api_get_cards(request):
     rows = database.get_user_cards(user_id)
     cards = []
     for r in rows:
-        c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, st, is_def, dt = r
+        if len(r) >= 11:
+            c_id, c_num, exp_m, exp_y, cvv, c_name, used_c, max_l, st, is_def, dt = r[:11]
+        else:
+            c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, st, is_def, dt = r[:10]
+            c_name = ""
         mask_num = f"**** {c_num[-4:]}" if len(c_num) >= 4 else "****"
         cards.append({
             "id": c_id,
             "masked_number": mask_num,
+            "cardholder_name": c_name,
             "exp_month": exp_m,
             "exp_year": exp_y,
             "used_count": used_c,
@@ -326,6 +331,7 @@ async def api_add_card(request):
     exp_month = str(data.get('exp_month', ''))
     exp_year = str(data.get('exp_year', ''))
     cvv = str(data.get('cvv', ''))
+    cardholder_name = str(data.get('cardholder_name', '')).strip()
 
     clean_num = "".join(filter(str.isdigit, card_number))
     if len(clean_num) != 16:
@@ -333,8 +339,16 @@ async def api_add_card(request):
     if not exp_month or not exp_year or len(cvv) != 3:
         return json_response({"success": False, "error": "Amal qilish muddati yoki CVV xato!"})
 
-    card_id = database.add_user_card(user_id, clean_num, exp_month, exp_year, cvv, max_limit=3)
-    return json_response({"success": True, "card_id": card_id})
+    # Ism-familiya tekshiruvi (M.M yoki M. Eshmatov emas, to'liq Eshmatov Toshmat)
+    if "." in cardholder_name:
+        return json_response({"success": False, "error": "Qisqartirilgan format (M.M yoki M. Eshmatov) qabul qilinmaydi! To'liq yozing."})
+    parts = [p for p in cardholder_name.split() if p]
+    if len(parts) < 2 or any(len(p) < 2 for p in parts):
+        return json_response({"success": False, "error": "Ism va familiyani to'liq yozing (Masalan: Eshmatov Toshmat)!"})
+
+    clean_name = " ".join(parts).title()
+    card_id = database.add_user_card(user_id, clean_num, exp_month, exp_year, cvv, cardholder_name=clean_name, max_limit=3)
+    return json_response({"success": True, "card_id": card_id, "cardholder_name": clean_name})
 
 async def api_delete_card(request):
     data = await request.json()

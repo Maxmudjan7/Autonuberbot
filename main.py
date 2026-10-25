@@ -37,6 +37,7 @@ class CardStates(StatesGroup):
     waiting_card_number = State()
     waiting_card_exp = State()
     waiting_card_cvv = State()
+    waiting_card_name = State()
 
 # Admin FSM holatlari
 class AdminStates(StatesGroup):
@@ -359,12 +360,18 @@ async def show_user_cards_menu(call: types.CallbackQuery):
         text += "<i>Hozircha saqlangan kartalaringiz yo'q.</i>\n"
     else:
         for idx, c in enumerate(cards, 1):
-            c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, c_status, is_def, _ = c
+            if len(c) >= 11:
+                c_id, c_num, exp_m, exp_y, cvv, c_name, used_c, max_l, c_status, is_def, _ = c[:11]
+            else:
+                c_id, c_num, exp_m, exp_y, cvv, used_c, max_l, c_status, is_def, _ = c[:10]
+                c_name = ""
             mask_num = f"**** {c_num[-4:]}" if len(c_num) >= 4 else "****"
             def_str = " (Asosiy ⭐️)" if is_def else ""
             status_icon = "✅ Faol" if c_status == 'active' and used_c < max_l else "❌ Limit to'lgan"
+            name_info = f"   • Egasi: <b>{c_name}</b>\n" if c_name else ""
             text += (
                 f"<b>{idx}. 💳 {mask_num}</b>{def_str}\n"
+                f"{name_info}"
                 f"   • Muddati: {exp_m}/{exp_y}\n"
                 f"   • Ishlatildi: <b>{used_c}/{max_l} ta</b>\n"
                 f"   • Holati: {status_icon}\n\n"
@@ -443,10 +450,53 @@ async def process_card_cvv_input(message: types.Message, state: FSMContext):
         await message.answer("❌ <b>CVV kod 3 ta raqam bo'lishi kerak!</b> Qaytadan kiriting:")
         return
 
+    await state.update_data(cvv=cvv)
+    await state.set_state(CardStates.waiting_card_name)
+    await message.answer(
+        "👤 <b>Karta egasining to'liq Ism va Familiyasini kiriting:</b>\n\n"
+        "<i>(Masalan: Eshmatov Toshmat yoki Toshmat Eshmatov)</i>\n\n"
+        "⚠️ <b>Muhim talab:</b> Qisqartma (M.M yoki M. Eshmatov) shaklida emas, to'liq so'zlar bilan yozilishi shart!"
+    )
+
+@dp.message(CardStates.waiting_card_name)
+async def process_card_name_input(message: types.Message, state: FSMContext):
+    raw_name = (message.text or "").strip()
+    
+    # Qisqartmalarni (nuqtali) tekshirish
+    if "." in raw_name:
+        await message.answer(
+            "❌ <b>Qisqartirilgan format (M.M yoki M. Eshmatov) qabul qilinmaydi!</b>\n\n"
+            "Iltimos, ism va familiyangizni nuqtasiz, to'liq so'zlar bilan yozing.\n"
+            "<i>To'g'ri misol:</i> <b>Eshmatov Toshmat</b>\n\n"
+            "Qaytadan kiriting:"
+        )
+        return
+
+    parts = [p for p in raw_name.split() if p]
+    if len(parts) < 2:
+        await message.answer(
+            "❌ <b>Ism va familiya to'liq emas!</b>\n\n"
+            "Iltimos, ham ismingizni, ham familiyangizni to'liq kiriting (kamida 2 ta so'z).\n"
+            "<i>Misol:</i> <b>Eshmatov Toshmat</b>\n\n"
+            "Qaytadan kiriting:"
+        )
+        return
+
+    for p in parts:
+        if len(p) < 2:
+            await message.answer(
+                "❌ <b>Ism yoki familiya 1 ta harfdan iborat bo'lishi mumkin emas!</b>\n"
+                "Iltimos, to'liq so'zlar bilan kiriting (Masalan: <b>Eshmatov Toshmat</b>):"
+            )
+            return
+
+    clean_cardholder_name = " ".join(parts).title()
+
     data = await state.get_data()
     card_number = data["card_number"]
     exp_month = data["exp_month"]
     exp_year = data["exp_year"]
+    cvv = data["cvv"]
 
     card_id = database.add_user_card(
         user_id=message.from_user.id,
@@ -454,6 +504,7 @@ async def process_card_cvv_input(message: types.Message, state: FSMContext):
         exp_month=exp_month,
         exp_year=exp_year,
         cvv=cvv,
+        cardholder_name=clean_cardholder_name,
         max_limit=3
     )
     await state.clear()
@@ -462,13 +513,14 @@ async def process_card_cvv_input(message: types.Message, state: FSMContext):
     success_text = (
         f"✅ <b>Karta muvaffaqiyatli saqlandi!</b>\n\n"
         f"💳 <b>Karta:</b> {mask_num}\n"
+        f"👤 <b>Karta egasi:</b> {clean_cardholder_name}\n"
         f"📅 <b>Muddati:</b> {exp_month}/{exp_year}\n"
         f"⭐️ <b>Limit:</b> 3 tagacha premium olish mumkin\n\n"
-        f"Endi «📱 Number olish (Avto)» tugmasini bosishingiz mumkin!"
+        f"Endi «Avto olish (Robot)» tugmasini bosishingiz mumkin!"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Number olish (Avto)", callback_data="user_get_number", style="primary")],
-        [InlineKeyboardButton(text="💳 Kartalarim", callback_data="user_my_cards", style="success")],
+        [InlineKeyboardButton(text="Avto olish (Robot)", callback_data="user_get_number_auto", style="primary")],
+        [InlineKeyboardButton(text="Mening kartalarim", callback_data="user_my_cards", style="success")],
         [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
     ])
     await message.answer(success_text, parse_mode="HTML", reply_markup=kb)

@@ -234,3 +234,4 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
     except Exception as e:
         logger.error(f"[{phone}] BestBit jarayonida kutilmagan xatolik: {e}", exc_info=True)
         return {"success": False, "check_link": None, "error": str(e)}
+

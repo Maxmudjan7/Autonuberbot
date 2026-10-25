@@ -593,7 +593,7 @@ function renderCardsModalList() {
         return `
             <div class="p-2.5 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-between">
                 <div>
-                    <span class="font-mono text-xs font-bold text-slate-200">${c.masked_number}</span>
+                    <span class="font-mono text-xs font-bold text-slate-200">${c.masked_number} ${c.cardholder_name ? `<span class="text-[10px] text-cyan-300 font-sans font-normal ml-1">(${c.cardholder_name})</span>` : ''}</span>
                     <span class="text-[10px] text-slate-400 block">${c.exp_month}/${c.exp_year} • Ishlatildi: <b class="${isLimit ? 'text-rose-400' : 'text-cyan-300'}">${c.used_count}/${c.max_limit}</b></span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -622,6 +622,7 @@ async function submitNewCard() {
     const pan = document.getElementById('new-card-pan')?.value.replace(/\D/g, '') || '';
     const exp = document.getElementById('new-card-exp')?.value.replace(/\D/g, '') || '';
     const cvv = document.getElementById('new-card-cvv')?.value.replace(/\D/g, '') || '';
+    const name = (document.getElementById('new-card-name')?.value || '').trim();
 
     if (pan.length !== 16) {
         showToast("Karta raqami 16 ta raqam bo'lishi kerak!", 'error');
@@ -633,6 +634,15 @@ async function submitNewCard() {
     }
     if (cvv.length !== 3) {
         showToast("CVV kod 3 ta raqam bo'lishi kerak!", 'error');
+        return;
+    }
+    if (name.includes('.')) {
+        showToast("Qisqartirilgan format (M.M yoki M. Eshmatov) qabul qilinmaydi! To'liq yozing.", 'error');
+        return;
+    }
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length < 2 || parts.some(p => p.length < 2)) {
+        showToast("Ism va familiyani to'liq yozing (Masalan: Eshmatov Toshmat)!", 'error');
         return;
     }
 
@@ -650,7 +660,8 @@ async function submitNewCard() {
                 card_number: pan,
                 exp_month: month,
                 exp_year: year,
-                cvv: cvv
+                cvv: cvv,
+                cardholder_name: name
             })
         });
         const data = await res.json();
@@ -660,6 +671,8 @@ async function submitNewCard() {
             document.getElementById('new-card-pan').value = '';
             document.getElementById('new-card-exp').value = '';
             document.getElementById('new-card-cvv').value = '';
+            const nameEl = document.getElementById('new-card-name');
+            if (nameEl) nameEl.value = '';
             await loadUserCards();
         } else {
             showToast(data.error || "Xatolik!", 'error');

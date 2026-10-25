@@ -38,7 +38,11 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     To'liq avtomatik jarayonni amalga oshiradi.
     status_callback(step_num: int, total_steps: int, title: str, text: str, extra: dict)
     """
-    card_id, card_number, exp_month, exp_year, cvv, used_count, max_limit, card_status, is_def = card_row
+    if len(card_row) >= 10:
+        card_id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, card_status, is_def = card_row[:10]
+    else:
+        card_id, card_number, exp_month, exp_year, cvv, used_count, max_limit, card_status, is_def = card_row[:9]
+        cardholder_name = ""
     
     # 0. Karta limitini tekshirish
     if used_count >= max_limit:
@@ -209,17 +213,20 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         {"payment_url": payment_url}
     )
 
-    # Akkaunt nomini olish (Ism/Familiya - Customer info uchun)
-    full_acc_name = "Telegram User"
-    try:
-        me_acc = await temp_client.get_me()
-        first_n = getattr(me_acc, 'first_name', '') or ''
-        last_n = getattr(me_acc, 'last_name', '') or ''
-        comb_name = f"{first_n} {last_n}".strip()
-        if comb_name:
-            full_acc_name = comb_name
-    except Exception:
-        pass
+    # Karta egasining ism-familiyasi (foydalanuvchi kiritgan to'liq ism)
+    final_acc_name = str(cardholder_name).strip() if cardholder_name else ""
+    if not final_acc_name:
+        try:
+            me_acc = await temp_client.get_me()
+            first_n = getattr(me_acc, 'first_name', '') or ''
+            last_n = getattr(me_acc, 'last_name', '') or ''
+            comb_name = f"{first_n} {last_n}".strip()
+            if comb_name:
+                final_acc_name = comb_name
+        except Exception:
+            pass
+    if not final_acc_name:
+        final_acc_name = "Telegram User"
 
     tok_res = smart_glocal.tokenize_card(
         payment_url=payment_url,
@@ -227,7 +234,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         exp_month=exp_month,
         exp_year=exp_year,
         cvv=cvv,
-        cardholder_name=full_acc_name
+        cardholder_name=final_acc_name
     )
 
     if not tok_res.get("success"):
@@ -253,10 +260,10 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         if inv_obj and getattr(inv_obj, 'name_requested', False):
             from telethon.tl.functions.payments import ValidateRequestedInfoRequest
             from telethon.tl.types import PaymentRequestedInfo
-            logger.info(f"Telegram to'lovi uchun ism-familiya avtomatik kiritilmoqda: '{full_acc_name}'")
+            logger.info(f"Telegram to'lovi uchun ism-familiya kiritilmoqda: '{final_acc_name}'")
             val_res = await temp_client(ValidateRequestedInfoRequest(
                 invoice=input_inv,
-                info=PaymentRequestedInfo(name=full_acc_name),
+                info=PaymentRequestedInfo(name=final_acc_name),
                 save=True
             ))
             requested_info_id = getattr(val_res, 'id', None)
