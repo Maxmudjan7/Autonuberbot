@@ -346,6 +346,13 @@ async def api_withdraw(request):
     if not ok:
         return json_response({"success": False, "error": res})
 
+    # Adminga tezkor Telegram xabar yuborish
+    try:
+        from main import notify_admin_new_withdrawal
+        asyncio.create_task(notify_admin_new_withdrawal(res, user_id, amount, card))
+    except Exception as e:
+        logger.warning(f"Adminga pul yechish xabari yuborishda xatolik: {e}")
+
     return json_response({"success": True, "withdrawal_id": res})
 
 async def api_withdrawals(request):

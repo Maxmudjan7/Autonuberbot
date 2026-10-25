@@ -835,6 +835,44 @@ def get_user_withdrawals(user_id: int):
     conn.close()
     return rows
 
+def get_withdrawal(w_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, user_id, amount, card_details, status, request_date FROM withdrawals WHERE id = ?", (w_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def approve_withdrawal(w_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE withdrawals SET status = 'paid' WHERE id = ? AND status = 'pending'", (w_id,))
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def reject_withdrawal(w_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("BEGIN IMMEDIATE")
+    cursor.execute("SELECT user_id, amount, status FROM withdrawals WHERE id = ?", (w_id,))
+    row = cursor.fetchone()
+    if not row or row[2] != 'pending':
+        conn.rollback()
+        conn.close()
+        return False, None
+    user_id, amount, status = row
+    cursor.execute("""
+        UPDATE users 
+        SET balance = balance + ?, total_withdrawn = total_withdrawn - ? 
+        WHERE user_id = ?
+    """, (amount, amount, user_id))
+    cursor.execute("UPDATE withdrawals SET status = 'rejected' WHERE id = ?", (w_id,))
+    conn.commit()
+    conn.close()
+    return True, (user_id, amount)
+
 # ==========================================
 # FOYDALANUVCHI KARTALARI (PREMIUM TO'LOV)
 # ==========================================

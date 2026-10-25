@@ -56,3 +56,4 @@ def decrypt_data(cipher_text: str) -> str:
     except Exception as e:
         logger.error(f"Deshifrlash xatosi: {e}")
         return cipher_text
+

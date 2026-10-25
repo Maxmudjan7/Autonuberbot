@@ -104,7 +104,7 @@ async def rotate_ip(reason: str = "avtomatik 1 daqiqalik davr") -> bool:
     try:
         loop = asyncio.get_running_loop()
         def _fetch():
-            req = urllib.request.Request(rot_url, headers={"User-Agent": "Autonuberbot/1.0"})
+            req =urllib.request.Request(rot_url, headers={"User-Agent": "Autonuberbot/1.0"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return resp.read().decode('utf-8', errors='ignore')
 
@@ -143,3 +143,4 @@ def start_background_rotation():
     global _rotation_task
     if _rotation_task is None or _rotation_task.done():
         _rotation_task = asyncio.create_task(_auto_rotation_loop())
+

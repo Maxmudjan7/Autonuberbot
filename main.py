@@ -33,7 +33,7 @@ dp = Dispatcher()
 class AdminAuthMiddleware(BaseMiddleware):
     ADMIN_PREFIXES = (
         "menu_", "back_to_admin_root", "ub_", "edit_st_", "admin_", 
-        "appr_w_", "rej_w_", "bc_", "usr_", "del_ub_", "del_st_", 
+        "appr_w_", "rej_w_", "wview_", "bc_", "usr_", "del_ub_", "del_st_", 
         "refresh_pending", "toggle_pending_", "anybot_"
     )
 
@@ -69,6 +69,11 @@ class CardStates(StatesGroup):
     waiting_card_exp = State()
     waiting_card_cvv = State()
     waiting_card_name = State()
+
+# Pul yechish FSM
+class WithdrawStates(StatesGroup):
+    waiting_amount = State()
+    waiting_card = State()
 
 # Admin FSM holatlari
 class AdminStates(StatesGroup):
@@ -246,8 +251,10 @@ async def cmd_start(message: types.Message):
     text = get_welcome_text(full_name, premiums)
     await message.answer(text, parse_mode="HTML", reply_markup=get_user_inline_keyboard())
 
-@dp.callback_query(F.data == "back_to_main_menu")
-async def callback_back_to_main(call: types.CallbackQuery):
+@dp.callback_query(F.data.in_(["back_to_main_menu", "back_to_menu"]))
+async def callback_back_to_main(call: types.CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
     user_id = call.from_user.id
     username = call.from_user.username or ""
     full_name = call.from_user.full_name or "Foydalanuvchi"
@@ -292,6 +299,43 @@ async def send_channel_payment_log(user_id: int, user_display: str, phone: str, 
         await bot.send_message(chat_id=target_chat, text=text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Kanalga to'lov log yuborishda xatolik: {e}")
+
+async def notify_admin_new_withdrawal(w_id: int, user_id: int, amount: float, card_details: str):
+    """
+    Yangi pul yechish so'rovi bo'yicha barcha adminlarga tezkor Telegram xabar yuboradi.
+    Xabarda to'lovni tasdiqlash yoki rad etish tugmalari bo'ladi.
+    """
+    admin_ids = set()
+    if config.ADMIN_ID:
+        try:
+            admin_ids.add(int(config.ADMIN_ID))
+        except (ValueError, TypeError):
+            pass
+    for a_row in database.get_all_admins():
+        try:
+            admin_ids.add(int(a_row[0]))
+        except (ValueError, TypeError):
+            pass
+
+    text = (
+        f"💸 <b>Yangi pul yechish so'rovi! #{w_id}</b>\n\n"
+        f"👤 <b>Foydalanuvchi:</b> <code>{user_id}</code>\n"
+        f"💰 <b>Summa:</b> <code>{amount:,.0f}</code> so'm\n"
+        f"💳 <b>Karta / Hamyon:</b> <code>{card_details}</code>\n"
+        f"⏳ <b>Holat:</b> Kutilmoqda (Pending)\n\n"
+        f"<i>To'lovni amalga oshirgach quyidagi tugmani bosing:</i>"
+    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ To'landi (Tasdiqlash)", callback_data=f"appr_w_{w_id}"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej_w_{w_id}")
+        ]
+    ])
+    for adm_id in admin_ids:
+        try:
+            await bot.send_message(chat_id=adm_id, text=text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception as e:
+            logger.error(f"Admin {adm_id} ga pul yechish xabarini yuborishda xatolik: {e}")
 
 # ==========================================
 # NUMBER OLISH VA TAYMER
@@ -934,14 +978,114 @@ async def handle_user_history(event: types.Message | types.CallbackQuery):
 
 @dp.callback_query(F.data == "user_withdraw")
 @dp.message(F.text == "💸 Pul yechish")
-async def handle_withdraw_placeholder(event: types.Message | types.CallbackQuery):
+async def handle_user_withdraw_start(event: types.Message | types.CallbackQuery, state: FSMContext):
     if isinstance(event, types.Message):
         await cleanup_reply_keyboard(event)
-    text = "💸 <b>Pul yechish bo'limi</b>\n\nTez orada ishga tushadi! Yangiliklarni kuzatib boring."
+    user_id = event.from_user.id
+    user = database.get_user(user_id)
+    balance = float(user[3]) if user else 0.0
+    min_amount = 100000.0
+
+    if balance < min_amount:
+        text = (
+            f"💸 <b>Pul yechish bo'limi</b>\n\n"
+            f"💰 Sizning balansingiz: <b>{balance:,.0f} so'm</b>\n"
+            f"⚠️ Minimal yechish summasi: <b>{min_amount:,.0f} so'm</b>\n\n"
+            f"Pul yechish uchun hisobingizda kamida {min_amount:,.0f} so'm bo'lishi kerak. Premium buyurtmalarni bajarib balansingizni to'ldiring!"
+        )
+        if isinstance(event, types.CallbackQuery):
+            await event.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        else:
+            await event.answer(text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    await state.set_state(WithdrawStates.waiting_amount)
+    await state.update_data(balance=balance)
+    text = (
+        f"💸 <b>Pul yechish</b>\n\n"
+        f"💰 Sizning balansingiz: <b>{balance:,.0f} so'm</b>\n"
+        f"⚠️ Minimal yechish: <b>{min_amount:,.0f} so'm</b>\n\n"
+        f"Qancha summa yechmoqchisiz? Summani raqamda kiriting (masalan: <code>100000</code>):\n\n"
+        f"<i>Bekor qilish: /cancel</i>"
+    )
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="back_to_main_menu")]
+    ])
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        await event.message.edit_text(text, parse_mode="HTML", reply_markup=cancel_kb)
     else:
-        await event.answer(text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+        await event.answer(text, parse_mode="HTML", reply_markup=cancel_kb)
+
+@dp.message(WithdrawStates.waiting_amount)
+async def process_withdraw_amount(message: types.Message, state: FSMContext):
+    if message.text and message.text.strip().lower() in ["/cancel", "bekor qilish"]:
+        await state.clear()
+        await message.answer("Pul yechish bekor qilindi.", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    data = await state.get_data()
+    balance = data.get("balance", 0.0)
+    min_amount = 100000.0
+
+    raw = message.text.replace(" ", "").replace(",", "").replace(".", "").strip()
+    if not raw.isdigit():
+        await message.answer("⚠️ Iltimos, summani faqat butun raqamlarda kiriting (masalan: 100000):")
+        return
+
+    amount = float(raw)
+    if amount < min_amount:
+        await message.answer(f"⚠️ Minimal yechish summasi: <b>{min_amount:,.0f} so'm</b>. Qaytadan kiriting:", parse_mode="HTML")
+        return
+    if amount > balance:
+        await message.answer(f"⚠️ Balansingizda yetarli mablag' yo'q!\nSizning balansingiz: <b>{balance:,.0f} so'm</b>\nQaytadan kiriting:", parse_mode="HTML")
+        return
+
+    await state.update_data(withdraw_amount=amount)
+    await state.set_state(WithdrawStates.waiting_card)
+    await message.answer(
+        f"💰 Yechiladigan summa: <b>{amount:,.0f} so'm</b>\n\n"
+        f"💳 Pullar o'tkazilishi kerak bo'lgan <b>karta yoki hamyon raqamingizni</b> kiriting:\n"
+        f"<i>(Masalan: 8600 0000 0000 0000 yoki Humo/Uzcard raqami)</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="back_to_main_menu")]
+        ])
+    )
+
+@dp.message(WithdrawStates.waiting_card)
+async def process_withdraw_card(message: types.Message, state: FSMContext):
+    if message.text and message.text.strip().lower() in ["/cancel", "bekor qilish"]:
+        await state.clear()
+        await message.answer("Pul yechish bekor qilindi.", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    card = message.text.strip()
+    if len(card) < 8:
+        await message.answer("⚠️ Iltimos, to'liq va to'g'ri karta yoki hamyon ma'lumotlarini kiriting:")
+        return
+
+    data = await state.get_data()
+    amount = data.get("withdraw_amount", 0.0)
+    user_id = message.from_user.id
+    await state.clear()
+
+    ok, res = database.create_withdrawal(user_id, amount, card)
+    if not ok:
+        await message.answer(f"❌ Xatolik yuz berdi: {res}", reply_markup=get_back_to_menu_keyboard())
+        return
+
+    w_id = res
+    await message.answer(
+        f"✅ <b>Pul yechish so'rovingiz qabul qilindi! #{w_id}</b>\n\n"
+        f"💰 Summa: <b>{amount:,.0f} so'm</b>\n"
+        f"💳 Karta: <code>{card}</code>\n\n"
+        f"⏳ So'rovingiz adminlar tomonidan tekshirilib, tez orada to'lab beriladi.",
+        parse_mode="HTML",
+        reply_markup=get_back_to_menu_keyboard()
+    )
+
+    # Adminga tezkor bildirishnoma yuborish
+    asyncio.create_task(notify_admin_new_withdrawal(w_id, user_id, amount, card))
 
 @dp.callback_query(F.data == "user_manual")
 @dp.message(F.text == "📖 Qo'llanma")
@@ -1807,6 +1951,126 @@ async def show_withdrawals_menu(call: types.CallbackQuery):
     btns.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin_root")])
     text = f"💸 <b>Pul yechish so'rovlari: {len(pending_w)} ta</b>" if pending_w else "💸 Yangi pul yechish so'rovlari yo'q. ✅"
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
+
+@dp.callback_query(F.data.startswith("wview_"))
+async def view_withdrawal_cb(call: types.CallbackQuery):
+    w_id = int(call.data.split("_")[1])
+    w = database.get_withdrawal(w_id)
+    if not w:
+        await call.answer("Bunday so'rov topilmadi!", show_alert=True)
+        return
+    _, user_id, amount, card_details, status, req_date = w
+    
+    st_emoji = "⏳ Kutilmoqda" if status == "pending" else ("✅ To'langan" if status == "paid" else "❌ Rad etilgan")
+    text = (
+        f"💸 <b>Pul yechish so'rovi #{w_id}</b>\n\n"
+        f"👤 <b>Foydalanuvchi ID:</b> <code>{user_id}</code>\n"
+        f"💰 <b>Summa:</b> <code>{amount:,.0f}</code> so'm\n"
+        f"💳 <b>Karta / Hamyon:</b> <code>{card_details}</code>\n"
+        f"📅 <b>Sana:</b> {str(req_date)[:19]}\n"
+        f"📊 <b>Holati:</b> {st_emoji}\n"
+    )
+    btns = []
+    if status == "pending":
+        btns.append([
+            InlineKeyboardButton(text="✅ To'landi (Tasdiqlash)", callback_data=f"appr_w_{w_id}"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej_w_{w_id}")
+        ])
+    btns.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="menu_withdrawals")])
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
+
+@dp.callback_query(F.data.startswith("appr_w_"))
+async def approve_withdrawal_cb(call: types.CallbackQuery):
+    w_id = int(call.data.split("_")[2])
+    w = database.get_withdrawal(w_id)
+    if not w:
+        await call.answer("Bunday so'rov topilmadi!", show_alert=True)
+        return
+    _, user_id, amount, card_details, status, req_date = w
+    if status != 'pending':
+        await call.answer(f"Bu so'rov allaqachon ko'rib chiqilgan ({status})!", show_alert=True)
+        return
+
+    ok = database.approve_withdrawal(w_id)
+    if ok:
+        await call.answer("✅ To'lov tasdiqlandi!")
+        admin_name = f"@{call.from_user.username}" if call.from_user.username else f"ID: {call.from_user.id}"
+        new_text = (
+            f"✅ <b>Pul yechish #{w_id} to'landi!</b>\n\n"
+            f"👤 Foydalanuvchi: <code>{user_id}</code>\n"
+            f"💰 Summa: <code>{amount:,.0f}</code> so'm\n"
+            f"💳 Karta / Hamyon: <code>{card_details}</code>\n"
+            f"👮‍♂️ Tasdiqlagan admin: {admin_name}"
+        )
+        try:
+            await call.message.edit_text(new_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Pul yechishlarga qaytish", callback_data="menu_withdrawals")]
+            ]))
+        except Exception:
+            pass
+
+        # Foydalanuvchiga xabar yuborish
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    f"🎉 <b>Pul yechish so'rovingiz to'landi!</b>\n\n"
+                    f"💰 Summa: <b>{amount:,.0f} so'm</b>\n"
+                    f"💳 Karta / Hamyon: <code>{card_details}</code>\n\n"
+                    f"Mablag' hisobingizga o'tkazib berildi. Biz bilan hamkorlik qilayotganingiz uchun rahmat! 😊"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Foydalanuvchi {user_id} ga xabar yetmadi: {e}")
+    else:
+        await call.answer("Xatolik yuz berdi!", show_alert=True)
+
+@dp.callback_query(F.data.startswith("rej_w_"))
+async def reject_withdrawal_cb(call: types.CallbackQuery):
+    w_id = int(call.data.split("_")[2])
+    w = database.get_withdrawal(w_id)
+    if not w:
+        await call.answer("Bunday so'rov topilmadi!", show_alert=True)
+        return
+    _, user_id, amount, card_details, status, req_date = w
+    if status != 'pending':
+        await call.answer(f"Bu so'rov allaqachon ko'rib chiqilgan ({status})!", show_alert=True)
+        return
+
+    ok, info = database.reject_withdrawal(w_id)
+    if ok:
+        await call.answer("❌ So'rov rad etildi va mablag' balansga qaytarildi.")
+        admin_name = f"@{call.from_user.username}" if call.from_user.username else f"ID: {call.from_user.id}"
+        new_text = (
+            f"❌ <b>Pul yechish #{w_id} rad etildi!</b>\n\n"
+            f"👤 Foydalanuvchi: <code>{user_id}</code>\n"
+            f"💰 Summa: <code>{amount:,.0f}</code> so'm (balansga qaytarildi)\n"
+            f"💳 Karta / Hamyon: <code>{card_details}</code>\n"
+            f"👮‍♂️ Rad etgan admin: {admin_name}"
+        )
+        try:
+            await call.message.edit_text(new_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Pul yechishlarga qaytish", callback_data="menu_withdrawals")]
+            ]))
+        except Exception:
+            pass
+
+        # Foydalanuvchiga xabar yuborish
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    f"❌ <b>Pul yechish so'rovingiz (#{w_id}) rad etildi.</b>\n\n"
+                    f"💰 <b>{amount:,.0f} so'm</b> balansingizga qaytarildi.\n"
+                    f"Sabab: Karta rekvizitlari noto'g'ri ko'rsatilgan yoki to'lov amalga oshmadi. Rekvizitlarni tekshirib qayta urinib ko'ring yoki adminga murojaat qiling."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Foydalanuvchi {user_id} ga xabar yetmadi: {e}")
+    else:
+        await call.answer("Xatolik yuz berdi!", show_alert=True)
 
 # ==========================================
 # 9. 👮‍♂️ ADMINLAR (Rasm 4)
