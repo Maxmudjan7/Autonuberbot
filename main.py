@@ -264,10 +264,12 @@ async def send_channel_number_log(user_id: int, user_display: str, phone: str, d
     ch = database.get_setting('channel_number_logs', '').strip()
     if not ch:
         return
+    bot_name = diller_bot.replace('@', '')
     text = (
         f"📱 <b>Number olindi</b>\n\n"
         f"👤 User: {user_display} (<code>{user_id}</code>)\n"
-        f"📞 Number: <code>{phone}</code>"
+        f"📞 Number: <code>{phone}</code>\n"
+        f"🤖 Bot: {bot_name}"
     )
     try:
         target_chat = int(ch) if (ch.startswith('-') and ch[1:].isdigit()) or ch.isdigit() else ch
