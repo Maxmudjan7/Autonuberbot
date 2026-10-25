@@ -1859,6 +1859,13 @@ async def main():
         except Exception as e:
             logger.error(f"MenuButtonWebApp o'rnatishda xatolik: {e}")
 
+    # Proksi IP avto-rotatsiyasini fonda yoqish
+    try:
+        import proxy_manager
+        proxy_manager.start_background_rotation()
+    except Exception as e:
+        logger.error(f"Proksi avto-rotatsiyani yoqishda xatolik: {e}")
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

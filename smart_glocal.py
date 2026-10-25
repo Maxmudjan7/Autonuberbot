@@ -22,6 +22,18 @@ def extract_hash_and_sign(url: str):
         return match.group(1), match.group(2)
     return None, None
 
+def _get_opener(ctx):
+    try:
+        import proxy_manager
+        if proxy_manager.is_proxy_enabled():
+            p_str = proxy_manager.get_proxy_string()
+            if p_str:
+                proxy_handler = urllib.request.ProxyHandler({'http': p_str, 'https': p_str})
+                return urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=ctx))
+    except Exception as e:
+        logger.warning(f"Proksi opener yaratishda xato: {e}")
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
 def get_bin_info(bin_number: str, hash_val: str, sign_val: str):
     """Karta BIN (birinchi 6 ta raqami) orqali karta turi va mamlakat kodini oladi"""
     bin_clean = re.sub(r'\D', '', str(bin_number))[:6]
@@ -34,7 +46,8 @@ def get_bin_info(bin_number: str, hash_val: str, sign_val: str):
     ctx = ssl.create_default_context()
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+        opener = _get_opener(ctx)
+        with opener.open(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
             card_info = data.get("cardInfo", {})
             country_code = card_info.get("countryCode", "us")
@@ -93,7 +106,8 @@ def tokenize_card(payment_url: str, card_number: str, exp_month: str, exp_year: 
     req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
 
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        opener = _get_opener(ctx)
+        with opener.open(req, timeout=15) as resp:
             res_data = json.loads(resp.read().decode())
             token = res_data.get("token")
             token_type = res_data.get("type", "card")

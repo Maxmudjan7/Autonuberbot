@@ -197,7 +197,11 @@ def init_db():
         ('webapp_url', ''),
         ('bestbit_ref_link', 'https://t.me/BestBitBot?start=U6278841173'),
         ('bestbit_target_channel', '@meningtolovlarim'),
-        ('bestbit_auto_spin', 'true')
+        ('bestbit_auto_spin', 'true'),
+        ('proxy_enabled', 'false'),
+        ('proxy_url', ''),
+        ('proxy_rotation_url', ''),
+        ('proxy_auto_rotate_minutes', '1')
     ]
     cursor.executemany('INSERT OR IGNORE INTO settings (setting_name, setting_value) VALUES (?, ?)', default_settings)
 

@@ -27,6 +27,7 @@ import database
 import userbot
 import smart_glocal
 import bestbit_service
+import proxy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,9 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     await status_callback(1, 6, "Raqam qidirilmoqda", "⏳ <b>Yangi raqam qidirilmoqda...</b>\nIltimos, biroz kuting...", {})
 
+    # Proksi IP manzilini yangilash (agar sozlangan bo'lsa)
+    await proxy_manager.trigger_rotation_before_purchase()
+
     # Raqam so'rash
     phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
     if not phone:
@@ -76,7 +80,13 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         {"phone": phone, "order_id": order_id}
     )
 
-    temp_client = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
+    proxy_conf = proxy_manager.get_telethon_proxy()
+    if proxy_conf:
+        logger.info(f"Yangi akkaunt uchun Proksi ulanmoqda: {proxy_conf[1]}:{proxy_conf[2]}")
+        temp_client = TelegramClient(StringSession(), config.API_ID, config.API_HASH, proxy=proxy_conf)
+    else:
+        temp_client = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
+
     await temp_client.connect()
 
     try:
