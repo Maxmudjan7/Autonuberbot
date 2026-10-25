@@ -7,7 +7,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 import logging
 import math
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters.command import Command
 from aiogram.types import (
     InlineKeyboardMarkup,
@@ -28,6 +28,37 @@ logger = logging.getLogger(__name__)
 
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
+
+# 🛡 XAVFSIZLIK: Admin buyruqlari va FSM holatlarini himoyalovchi Middleware
+class AdminAuthMiddleware(BaseMiddleware):
+    ADMIN_PREFIXES = (
+        "menu_", "back_to_admin_root", "ub_", "edit_st_", "admin_", 
+        "appr_w_", "rej_w_", "bc_", "usr_", "del_ub_", "del_st_", 
+        "refresh_pending", "toggle_pending_", "anybot_"
+    )
+
+    async def __call__(self, handler, event, data):
+        if isinstance(event, types.CallbackQuery):
+            c_data = event.data or ""
+            if any(c_data.startswith(pfx) for pfx in self.ADMIN_PREFIXES):
+                user_id = event.from_user.id
+                if not database.is_admin(user_id, config.ADMIN_ID):
+                    await event.answer("⛔️ Kechirasiz, ushbu amal faqat adminlar uchun ruxsat etilgan!", show_alert=True)
+                    return
+        elif isinstance(event, types.Message):
+            state = data.get("state")
+            if state:
+                curr_state = await state.get_state()
+                if curr_state and "AdminStates" in curr_state:
+                    user_id = event.from_user.id
+                    if not database.is_admin(user_id, config.ADMIN_ID):
+                        await state.clear()
+                        await event.answer("⛔️ Sizda adminlik huquqi mavjud emas!")
+                        return
+        return await handler(event, data)
+
+dp.message.middleware(AdminAuthMiddleware())
+dp.callback_query.middleware(AdminAuthMiddleware())
 
 # Faol taymer vazifalari (order_id -> asyncio.Task)
 active_timers = {}
@@ -233,12 +264,10 @@ async def send_channel_number_log(user_id: int, user_display: str, phone: str, d
     ch = database.get_setting('channel_number_logs', '').strip()
     if not ch:
         return
-    bot_name = diller_bot.replace('@', '')
     text = (
         f"📱 <b>Number olindi</b>\n\n"
         f"👤 User: {user_display} (<code>{user_id}</code>)\n"
-        f"📞 Number: <code>{phone}</code>\n"
-        f"🤖 Bot: {bot_name}"
+        f"📞 Number: <code>{phone}</code>"
     )
     try:
         target_chat = int(ch) if (ch.startswith('-') and ch[1:].isdigit()) or ch.isdigit() else ch

@@ -1,6 +1,7 @@
 import sqlite3
 import math
 from datetime import datetime, timedelta
+import crypto_utils
 
 DB_NAME = "bot_database.db"
 
@@ -126,6 +127,17 @@ def init_db():
     card_columns = [col[1] for col in cursor.fetchall()]
     if "cardholder_name" not in card_columns:
         cursor.execute("ALTER TABLE user_cards ADD COLUMN cardholder_name TEXT DEFAULT ''")
+
+    # 🔐 Xavfsizlik: Mavjud ochiq kartalarni bazada AES-256 bilan shifrlash
+    try:
+        cursor.execute("SELECT id, card_number, cvv FROM user_cards")
+        for cid, cnum, ccvv in cursor.fetchall():
+            if cnum and not str(cnum).startswith("gAAAAA"):
+                enc_n = crypto_utils.encrypt_data(cnum)
+                enc_c = crypto_utils.encrypt_data(ccvv)
+                cursor.execute("UPDATE user_cards SET card_number = ?, cvv = ? WHERE id = ?", (enc_n, enc_c, cid))
+    except Exception as e:
+        pass
 
     # Adminlar jadvali
     cursor.execute('''
@@ -776,19 +788,44 @@ def delete_broadcast(b_id: int):
     conn.close()
 
 def create_withdrawal(user_id: int, amount: float, card_details: str):
+    """
+    Xavfsiz pul yechish so'rovi (Atomic transaction):
+    Race condition va double spending (ikkita so'rovni bir vaqtda berib balansni minusga tushirish)dan 100% himoyalangan.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    if not row or row[0] < amount:
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row or row[0] < amount:
+            conn.rollback()
+            conn.close()
+            return False, "Balansingizda yetarli mablag' mavjud emas!"
+
+        cursor.execute("""
+            UPDATE users 
+            SET balance = balance - ?, total_withdrawn = total_withdrawn + ? 
+            WHERE user_id = ? AND balance >= ?
+        """, (amount, amount, user_id, amount))
+
+        if cursor.rowcount == 0:
+            conn.rollback()
+            conn.close()
+            return False, "Balansingizda yetarli mablag' mavjud emas!"
+
+        cursor.execute("""
+            INSERT INTO withdrawals (user_id, amount, card_details, status) 
+            VALUES (?, ?, ?, 'pending')
+        """, (user_id, amount, card_details))
+        w_id = cursor.lastrowid
+        conn.commit()
         conn.close()
-        return False, "Balansingizda yetarli mablag' mavjud emas!"
-    cursor.execute("UPDATE users SET balance = balance - ?, total_withdrawn = total_withdrawn + ? WHERE user_id = ?", (amount, amount, user_id))
-    cursor.execute("INSERT INTO withdrawals (user_id, amount, card_details, status) VALUES (?, ?, ?, 'pending')", (user_id, amount, card_details))
-    w_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return True, w_id
+        return True, w_id
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return False, str(e)
 
 def get_user_withdrawals(user_id: int):
     conn = get_connection()
@@ -809,6 +846,10 @@ def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str,
     clean_cvv = str(cvv).strip()
     clean_name = str(cardholder_name).strip()
 
+    # 🔐 Karta raqami va CVV ni AES-256 bilan shifrlash
+    enc_number = crypto_utils.encrypt_data(clean_number)
+    enc_cvv = crypto_utils.encrypt_data(clean_cvv)
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM user_cards WHERE user_id = ? AND is_default = 1", (user_id,))
@@ -818,7 +859,7 @@ def add_user_card(user_id: int, card_number: str, exp_month: str, exp_year: str,
     cursor.execute('''
         INSERT INTO user_cards (user_id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, status, is_default)
         VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?)
-    ''', (user_id, clean_number, clean_month, clean_year, clean_cvv, clean_name, max_limit, is_default))
+    ''', (user_id, enc_number, clean_month, clean_year, enc_cvv, clean_name, max_limit, is_default))
     card_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -835,7 +876,15 @@ def get_user_cards(user_id: int):
     ''', (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    return rows
+
+    # 🔐 Karta raqami va CVV ni xotirada deshifrlash
+    decrypted_rows = []
+    for r in rows:
+        c_id, c_num, exp_m, exp_y, cvv, c_name, used_c, max_l, st, is_def, dt = r
+        dec_num = crypto_utils.decrypt_data(c_num)
+        dec_cvv = crypto_utils.decrypt_data(cvv)
+        decrypted_rows.append((c_id, dec_num, exp_m, exp_y, dec_cvv, c_name, used_c, max_l, st, is_def, dt))
+    return decrypted_rows
 
 def get_active_card_for_user(user_id: int):
     """Foydalanuvchining limiti to'lmagan (used_count < max_limit) faol kartasini qaytaradi"""
@@ -849,7 +898,12 @@ def get_active_card_for_user(user_id: int):
     ''', (user_id,))
     row = cursor.fetchone()
     conn.close()
-    return row
+    if not row:
+        return None
+    c_id, c_num, exp_m, exp_y, cvv, c_name, used_c, max_l, st, is_def = row
+    dec_num = crypto_utils.decrypt_data(c_num)
+    dec_cvv = crypto_utils.decrypt_data(cvv)
+    return (c_id, dec_num, exp_m, exp_y, dec_cvv, c_name, used_c, max_l, st, is_def)
 
 def increment_card_usage(card_id: int):
     """Karta ishlatilganlik hisoblagichini oshiradi. 3 taga yetsa status='limit_reached' bo'ladi"""

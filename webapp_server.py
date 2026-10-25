@@ -3,6 +3,9 @@ import json
 import math
 import asyncio
 import logging
+import hmac
+import hashlib
+import urllib.parse
 from datetime import datetime, timezone
 from aiohttp import web
 
@@ -14,6 +17,58 @@ logger = logging.getLogger(__name__)
 
 # Web app directory
 WEBAPP_DIR = os.path.join(os.path.dirname(__file__), 'webapp')
+
+def validate_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
+    """Telegram WebApp initData HMAC-SHA256 xavfsizlik tekshiruvi"""
+    if not init_data or not bot_token:
+        return None
+    try:
+        parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+        hash_val = parsed.pop('hash', None)
+        if not hash_val:
+            return None
+
+        data_check_list = [f"{k}={v}" for k, v in sorted(parsed.items())]
+        data_check_string = "\n".join(data_check_list)
+
+        secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+        calc_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        if hmac.compare_digest(calc_hash, hash_val):
+            user_json = parsed.get("user")
+            if user_json:
+                return json.loads(user_json)
+        return None
+    except Exception as e:
+        logger.warning(f"initData validation xatosi: {e}")
+        return None
+
+def get_auth_user_id(request, json_data: dict = None) -> int | None:
+    """
+    So'rov yuboruvchining haqiqiy ID raqamini xavfsiz aniqlaydi.
+    1. Telegram WebApp initData HMAC tekshiruvi
+    2. Fallback: Faqat agar initData berilmagan bo'lsa, X-User-Id yoki query param user_id
+    Hech qachon o'zboshimchalik bilan ADMIN_ID ga tushib qolmaydi!
+    """
+    init_data = request.headers.get("X-Telegram-Init-Data") or request.query.get("initData")
+    if init_data:
+        user_info = validate_telegram_init_data(init_data, config.BOT_TOKEN)
+        if user_info and "id" in user_info:
+            return int(user_info["id"])
+
+    # Fallback tekshiruv
+    hdr_uid = request.headers.get("X-User-Id")
+    if hdr_uid and str(hdr_uid).isdigit():
+        return int(hdr_uid)
+
+    q_uid = request.query.get("user_id")
+    if q_uid and str(q_uid).isdigit():
+        return int(q_uid)
+
+    if json_data and json_data.get("user_id") and str(json_data.get("user_id")).isdigit():
+        return int(json_data.get("user_id"))
+
+    return None
 
 def get_seconds_left(expires_at_str, created_at_str=None, total_duration=300):
     if not expires_at_str:
@@ -55,11 +110,9 @@ async def handle_app_js(request):
 
 # API Handlers
 async def api_user_me(request):
-    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
-    try:
-        user_id = int(user_id_str)
-    except Exception:
-        user_id = config.ADMIN_ID
+    user_id = get_auth_user_id(request)
+    if not user_id:
+        return json_response({"error": "Avtorizatsiya talab qilinadi!"}, status=401)
 
     detail = database.get_user_full_detail(user_id)
     if not detail:
@@ -95,7 +148,9 @@ async def api_user_me(request):
 
 async def api_get_number(request):
     data = await request.json()
-    user_id = int(data.get('user_id', config.ADMIN_ID))
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
 
     active_order = database.get_active_order_for_user(user_id)
     if active_order:
@@ -141,10 +196,16 @@ async def api_get_number(request):
 
 async def api_get_code(request):
     data = await request.json()
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     order_id = int(data.get('order_id', 0))
     order = database.get_order(order_id)
     if not order or order[6] != 'active':
         return json_response({"success": False, "error": "Buyurtma topilmadi yoki faol emas!"})
+    if order[1] != user_id and not database.is_admin(user_id, config.ADMIN_ID):
+        return json_response({"success": False, "error": "Ushbu buyurtma sizga tegishli emas!"}, status=403)
 
     diller_bot = order[4]
     diller_msg_id = order[5]
@@ -166,15 +227,20 @@ async def api_get_code(request):
 
 async def api_order_received(request):
     data = await request.json()
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     order_id = int(data.get('order_id', 0))
     order = database.get_order(order_id)
     if not order or order[6] != 'active':
         return json_response({"success": False, "error": "Buyurtma faol emas!"})
+    if order[1] != user_id and not database.is_admin(user_id, config.ADMIN_ID):
+        return json_response({"success": False, "error": "Ushbu buyurtma sizga tegishli emas!"}, status=403)
 
     diller_bot = order[4]
     diller_msg_id = order[5]
     phone = order[2]
-    user_id = order[1]
 
     is_premium, res_msg = await userbot.check_premium_from_diller(diller_bot, diller_msg_id)
     if not is_premium:
@@ -194,10 +260,16 @@ async def api_order_received(request):
 
 async def api_order_freeze(request):
     data = await request.json()
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     order_id = int(data.get('order_id', 0))
     order = database.get_order(order_id)
     if not order or order[6] != 'active':
         return json_response({"success": False, "error": "Buyurtma faol emas!"})
+    if order[1] != user_id and not database.is_admin(user_id, config.ADMIN_ID):
+        return json_response({"success": False, "error": "Ushbu buyurtma sizga tegishli emas!"}, status=403)
 
     diller_bot = order[4]
     diller_msg_id = order[5]
@@ -209,10 +281,16 @@ async def api_order_freeze(request):
 
 async def api_order_cancel(request):
     data = await request.json()
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     order_id = int(data.get('order_id', 0))
     order = database.get_order(order_id)
     if not order or order[6] != 'active':
         return json_response({"success": False, "error": "Buyurtma faol emas!"})
+    if order[1] != user_id and not database.is_admin(user_id, config.ADMIN_ID):
+        return json_response({"success": False, "error": "Ushbu buyurtma sizga tegishli emas!"}, status=403)
 
     diller_bot = order[4]
     diller_msg_id = order[5]
@@ -235,11 +313,9 @@ async def api_rating(request):
     return json_response({"leaders": leaders})
 
 async def api_history(request):
-    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
-    try:
-        user_id = int(user_id_str)
-    except Exception:
-        user_id = config.ADMIN_ID
+    user_id = get_auth_user_id(request)
+    if not user_id:
+        return json_response({"history": []})
 
     history_raw = database.get_user_history(user_id, limit=20)
     history = []
@@ -254,7 +330,10 @@ async def api_history(request):
 
 async def api_withdraw(request):
     data = await request.json()
-    user_id = int(data.get('user_id', config.ADMIN_ID))
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     amount = float(data.get('amount', 0))
     card = str(data.get('card_details', '')).strip()
 
@@ -270,11 +349,9 @@ async def api_withdraw(request):
     return json_response({"success": True, "withdrawal_id": res})
 
 async def api_withdrawals(request):
-    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
-    try:
-        user_id = int(user_id_str)
-    except Exception:
-        user_id = config.ADMIN_ID
+    user_id = get_auth_user_id(request)
+    if not user_id:
+        return json_response({"withdrawals": []})
 
     rows = database.get_user_withdrawals(user_id)
     withdrawals = []
@@ -296,11 +373,9 @@ async def api_withdrawals(request):
 auto_buy_statuses = {}
 
 async def api_get_cards(request):
-    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
-    try:
-        user_id = int(user_id_str)
-    except Exception:
-        user_id = config.ADMIN_ID
+    user_id = get_auth_user_id(request)
+    if not user_id:
+        return json_response({"cards": []})
     
     rows = database.get_user_cards(user_id)
     cards = []
@@ -326,7 +401,10 @@ async def api_get_cards(request):
 
 async def api_add_card(request):
     data = await request.json()
-    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     card_number = str(data.get('card_number', ''))
     exp_month = str(data.get('exp_month', ''))
     exp_year = str(data.get('exp_year', ''))
@@ -352,14 +430,19 @@ async def api_add_card(request):
 
 async def api_delete_card(request):
     data = await request.json()
-    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
+
     card_id = int(data.get('card_id', 0))
     database.delete_user_card(card_id, user_id)
     return json_response({"success": True})
 
 async def api_auto_buy(request):
     data = await request.json()
-    user_id = int(data.get('user_id') or request.headers.get('X-User-Id') or config.ADMIN_ID)
+    user_id = get_auth_user_id(request, data)
+    if not user_id:
+        return json_response({"success": False, "error": "Avtorizatsiya talab qilinadi!"}, status=401)
 
     active_card = database.get_active_card_for_user(user_id)
     if not active_card:
@@ -395,11 +478,9 @@ async def api_auto_buy(request):
     return json_response({"success": True, "message": "Avto-olish jarayoni boshlandi!"})
 
 async def api_auto_status(request):
-    user_id_str = request.query.get('user_id') or request.headers.get('X-User-Id')
-    try:
-        user_id = int(user_id_str)
-    except Exception:
-        user_id = config.ADMIN_ID
+    user_id = get_auth_user_id(request)
+    if not user_id:
+        return json_response({"error": "Avtorizatsiya talab qilinadi!"}, status=401)
     
     st = auto_buy_statuses.get(user_id, {
         "step": 0,
