@@ -5,6 +5,10 @@ echo ========================================================
 echo        TELEGRAM PREMIUM BOT ISHGA TUSHMOQDA...
 echo ========================================================
 echo.
-"C:\Users\MSI\AppData\Local\Python\bin\python.exe" main.py
+if exist "C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe" (
+    "C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe" main.py
+) else (
+    python main.py
+)
 echo.
 pause
