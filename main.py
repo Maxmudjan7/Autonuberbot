@@ -1212,11 +1212,12 @@ async def view_userbot_details(call: types.CallbackQuery):
         return
 
     _, name, phone, tg_id, status, holat, active_nums, _ = target
+    status_label = "✅ Faol" if status == "active" else "❌ To'xtatilgan"
     text = (
         f"🤖 <b>Userbot: {name}</b>\n\n"
         f"📱 Telefon: <code>{phone}</code>\n"
         f"🆔 Telegram ID: <code>{tg_id}</code>\n"
-        f"📊 Status: <b>{'✅ Faol' if status == 'active' else '❌ To\'xtatilgan'}</b>\n"
+        f"📊 Status: <b>{status_label}</b>\n"
         f"⚙️ Holat: <b>{holat}</b>"
     )
     toggle_txt = "🔴 To'xtatish" if status == "active" else "🟢 Yoqish"
@@ -1784,9 +1785,10 @@ async def view_anybot_details(call: types.CallbackQuery):
         return
 
     _, b_uname, b_priority, b_status = target
+    b_status_label = "✅ Faol" if b_status == "active" else "❌ To'xtatilgan"
     text = (
         f"🤖 <b>Diller bot: {b_uname}</b>\n\n"
-        f"📊 Holati: <b>{'✅ Faol' if b_status == 'active' else '❌ To\'xtatilgan'}</b>"
+        f"📊 Holati: <b>{b_status_label}</b>"
     )
     toggle_txt = "🔴 To'xtatish" if b_status == "active" else "🟢 Yoqish"
     btns = [
