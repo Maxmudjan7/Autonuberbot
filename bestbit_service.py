@@ -31,6 +31,11 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
     for _ in range(max_wait):
         await asyncio.sleep(sleep_between)
         try:
+            if not client.is_connected():
+                try:
+                    await client.connect()
+                except Exception:
+                    pass
             msgs = await client.get_messages(entity, limit=4)
             for m in msgs:
                 if m.buttons:
@@ -77,12 +82,16 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
     try:
         # 1. Saved Messages ga referal havola yuborish
         try:
+            if not client.is_connected():
+                await client.connect()
             await client.send_message('me', ref_link)
             logger.info(f"[{phone}] Saved Messages ga referal havola tashlandi: {ref_link}")
         except Exception as e:
             logger.warning(f"[{phone}] Saved Messages ga tashlashda ogohlantirish: {e}")
 
         # 2. @BestBitBot ga referal kod bilan /start yuborish
+        if not client.is_connected():
+            await client.connect()
         bot_entity = await client.get_input_entity(bot_username)
         await client.send_message(bot_entity, f"/start {ref_code}")
         logger.info(f"[{phone}] @{bot_username} ga /start {ref_code} yuborildi.")
@@ -116,6 +125,8 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
             await asyncio.sleep(4.5)
 
         # 7. Qaytadan /start yuborish
+        if not client.is_connected():
+            await client.connect()
         await client.send_message(bot_entity, "/start")
         logger.info(f"[{phone}] Menyuga qaytish uchun /start yuborildi.")
         await asyncio.sleep(2.5)
