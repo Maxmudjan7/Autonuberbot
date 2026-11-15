@@ -122,19 +122,19 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         {"phone": phone}
     )
 
-    # Dillerdan kodni kutish (20 soniya davomida)
+    # Dillerdan kodni kutish (expected_phone bilan aniq tekshirish)
     auth_code = None
     auth_password = None
-    for _ in range(15):
-        await asyncio.sleep(2)
-        success, result = await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code")
+    for _ in range(2):
+        success, result = await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code", expected_phone=phone)
         if success:
             if isinstance(result, tuple):
                 auth_code, auth_password = result
             else:
                 auth_code = result
-            if auth_code:
+            if auth_code and auth_code.isdigit():
                 break
+        await asyncio.sleep(2)
 
     if not auth_code:
         await temp_client.disconnect()

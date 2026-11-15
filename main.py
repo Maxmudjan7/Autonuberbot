@@ -799,7 +799,7 @@ async def handle_callback_get_code(call: types.CallbackQuery):
     diller_msg_id = order[5]
     phone = order[2]
 
-    success, result = await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code")
+    success, result = await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code", expected_phone=phone)
 
     if success:
         if isinstance(result, tuple):

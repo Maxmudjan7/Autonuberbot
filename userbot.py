@@ -204,13 +204,25 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
         logger.error(f"Diller botdan raqam olishda xatolik: {e}")
         return None, None, f"Xatolik: {str(e)}"
 
-def extract_code_and_password(text: str):
+def extract_code_and_password(text: str, expected_phone: str = None):
     """Diller botidan kelgan xabardan Code va Parolni aniq ajratib olish"""
     if not text:
         return None, None
         
     # Telegram markdown belgilardan tozalash (`code`, **bold**, va h.k.)
     clean_text = text.replace('`', '').replace('*', '')
+
+    # Agar expected_phone berilgan bo'lsa va xabarda boshqa raqam bo'lsa, bu xabarni olmaymiz!
+    if expected_phone:
+        clean_exp = re.sub(r'\D', '', str(expected_phone))
+        # Masalan: "Number: 905538768937"
+        pm = re.search(r'(?:number|raqam)\s*[:=]?\s*(\+?\d{9,16})', clean_text, re.IGNORECASE)
+        if pm:
+            msg_phone = re.sub(r'\D', '', pm.group(1))
+            if msg_phone and clean_exp not in msg_phone and msg_phone not in clean_exp:
+                logger.warning(f"Xabar boshqa raqamga tegishli ({msg_phone} != {clean_exp}), o'tkazib yuborildi.")
+                return None, None
+
     code, password = None, None
     lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
     
@@ -225,18 +237,17 @@ def extract_code_and_password(text: str):
                 
         # Kod / Code qidirish (masalan: 🔒 Code: 92901 yoki Kod: 92901)
         if any(c in line_clean for c in ['code', 'kod']):
-            if any(w in line_clean for w in ['received', 'again', 'olish', 'kuting', 'waiting']):
+            if any(w in line_clean for w in ['received', 'again', 'olish', 'kuting', 'waiting', 'not found', 'yo\'q', 'topilmadi']):
                 continue
-            cm = re.search(r'(?:code|kod)\s*[:=]?\s*([0-9a-zA-Z\s-]+)', line, re.IGNORECASE)
+            # Telegram kodlari FAQAT raqam bo'ladi (4 dan 7 gacha raqam)
+            cm = re.search(r'(?:code|kod)\s*[:=]?\s*([0-9]{4,7})\b', line, re.IGNORECASE)
             if cm:
-                raw_c = cm.group(1).strip()
-                digits = re.sub(r'[^0-9a-zA-Z]', '', raw_c)
-                if len(digits) >= 4:
-                    code = digits
-                    continue
+                code = cm.group(1).strip()
+                continue
 
     if not code:
-        cm2 = re.search(r'(?:code|kod)\s*[:=]\s*([0-9]{4,8})', clean_text, re.IGNORECASE)
+        # Xabar matnidan raqamli kod qidirish (faqat raqamlar)
+        cm2 = re.search(r'(?:code|kod)\s*[:=]\s*([0-9]{4,7})\b', clean_text, re.IGNORECASE)
         if cm2:
             code = cm2.group(1).strip()
 
@@ -245,9 +256,13 @@ def extract_code_and_password(text: str):
         if pm2:
             password = re.sub(r'[^0-9a-zA-Z]', '', pm2.group(1).strip())
 
+    # Qo'shimcha tekshiruv: kod faqat raqam bo'lishi shart
+    if code and (not code.isdigit() or len(code) < 4):
+        code = None
+
     return code, password
 
-async def click_diller_button(diller_username: str, diller_msg_id: int, button_action: str):
+async def click_diller_button(diller_username: str, diller_msg_id: int, button_action: str, expected_phone: str = None):
     """Diller botidagi tugmani bosish (Get Code, Freeze, Cancel)"""
     c, _ = await get_working_client()
     if not c:
@@ -263,7 +278,7 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
 
         # Agar Get Code so'ralgan bo'lsa va xabarda allaqachon kod mavjud bo'lsa
         if "code" in button_action.lower():
-            c_now, p_now = extract_code_and_password(msg.text)
+            c_now, p_now = extract_code_and_password(msg.text, expected_phone=expected_phone)
             if c_now:
                 return True, (c_now, p_now)
 
@@ -305,21 +320,30 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
             return False, f"Diller botida '{button_action}' tugmasi topilmadi."
 
         if "code" in button_action.lower():
-            for _ in range(25):
-                await asyncio.sleep(1)
+            for _ in range(30):
+                await asyncio.sleep(1.5)
                 if not c.is_connected():
                     try:
                         await c.connect()
                     except Exception:
                         pass
+                
+                # 1. Asosiy diller xabarini tekshirish (diller_msg_id)
                 updated_msg = await c.get_messages(entity, ids=diller_msg_id)
-                new_msgs = await c.get_messages(entity, limit=4)
-                all_msgs = ([updated_msg] if updated_msg else []) + [m for m in new_msgs if m]
-                for m in all_msgs:
-                    if not m or not m.text:
-                        continue
-                    code, password = extract_code_and_password(m.text)
+                if updated_msg and updated_msg.text:
+                    code, password = extract_code_and_password(updated_msg.text, expected_phone=expected_phone)
                     if code:
+                        logger.info(f"Diller xabaridan (#{diller_msg_id}) kod olindi: {code}")
+                        return True, (code, password)
+
+                # 2. Yangi kelgan xabarlarni tekshirish (FAQAT diller_msg_id dan KEYINGI xabarlar!)
+                new_msgs = await c.get_messages(entity, min_id=diller_msg_id, limit=5)
+                for m in new_msgs:
+                    if not m or not m.text or m.id <= diller_msg_id:
+                        continue
+                    code, password = extract_code_and_password(m.text, expected_phone=expected_phone)
+                    if code:
+                        logger.info(f"Diller yangi xabaridan (#{m.id}) kod olindi: {code}")
                         return True, (code, password)
 
             return False, "Diller botidan kod kelmadi. Iltimos, «🔄 Qayta kod olish» tugmasini bosing."
