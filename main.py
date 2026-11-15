@@ -25,7 +25,11 @@ import database
 import userbot
 import auto_buyer
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 bot = Bot(token=config.BOT_TOKEN)
@@ -693,11 +697,37 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
                 [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
                 [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu")]
             ])
+            # 🔔 DIQQAT: edit_text ovozsiz bo'lgani sababli, yangi xabar yuborib bildirishnoma (ovoz) beramiz
+            try:
+                await bot.send_message(
+                    user_id,
+                    (
+                        "🔔 <b>DIQQAT! Bankdan SMS tasdiqlash kodi yuborildi!</b>\n\n"
+                        "To'lovni tasdiqlash uchun darhol pastdagi tugmani bosing va SMS kodni kiriting:"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])]
+                    ])
+                )
+            except Exception as notify_err:
+                logger.warning(f"3DS bildirishnoma yuborishda ogohlantirish: {notify_err}")
 
         try:
             await status_msg.edit_text(full_text, parse_mode="HTML", reply_markup=kb)
         except Exception:
             pass
+
+        if extra.get("completed"):
+            try:
+                await bot.send_message(
+                    user_id,
+                    "🎉 <b>Premium muvaffaqiyatli sotib olindi va avto-uzaytirish bekor qilindi!</b>",
+                    parse_mode="HTML",
+                    reply_markup=get_back_to_menu_keyboard()
+                )
+            except Exception:
+                pass
 
     asyncio.create_task(auto_buyer.run_auto_purchase_flow(user_id, active_card, update_status))
 

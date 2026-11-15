@@ -179,8 +179,8 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
 
         sent_msg = await c.send_message(entity, command)
 
-        for _ in range(20):
-            await asyncio.sleep(1)
+        for _ in range(35):
+            await asyncio.sleep(0.4)
             messages = await c.get_messages(entity, limit=4)
             for msg in messages:
                 if msg.id > sent_msg.id and msg.text:
@@ -240,25 +240,29 @@ def extract_code_and_password(text: str, expected_phone: str = None):
         if any(c in line_clean for c in ['code', 'kod']):
             if any(w in line_clean for w in ['received', 'again', 'olish', 'kuting', 'waiting', 'not found', 'yo\'q', 'topilmadi']):
                 continue
-            # Telegram kodlari FAQAT raqam bo'ladi (4 dan 7 gacha raqam)
-            cm = re.search(r'(?:code|kod)\s*[:=]?\s*([0-9]{4,7})\b', line, re.IGNORECASE)
+            # Telegram kodlari 5 xonali raqam bo'ladi (kamdan-kam 6 xonali)
+            cm = re.search(r'(?:code|kod)\s*[:=]?\s*([0-9]{5,6})\b', line, re.IGNORECASE)
             if cm:
-                code = cm.group(1).strip()
-                continue
+                val = cm.group(1).strip()
+                if val not in ("2024", "2025", "2026", "2027", "2028"):
+                    code = val
+                    continue
 
     if not code:
-        # Xabar matnidan raqamli kod qidirish (faqat raqamlar)
-        cm2 = re.search(r'(?:code|kod)\s*[:=]\s*([0-9]{4,7})\b', clean_text, re.IGNORECASE)
+        # Xabar matnidan raqamli kod qidirish (5-6 xonali)
+        cm2 = re.search(r'(?:code|kod)\s*[:=]\s*([0-9]{5,6})\b', clean_text, re.IGNORECASE)
         if cm2:
-            code = cm2.group(1).strip()
+            val2 = cm2.group(1).strip()
+            if val2 not in ("2024", "2025", "2026", "2027", "2028"):
+                code = val2
 
     if not password:
         pm2 = re.search(r'(?:pass(?:word)?|parol|2fa)\s*[:=]\s*([^\s\n\r]+)', clean_text, re.IGNORECASE)
         if pm2:
             password = re.sub(r'[^0-9a-zA-Z]', '', pm2.group(1).strip())
 
-    # Qo'shimcha tekshiruv: kod faqat raqam bo'lishi shart
-    if code and (not code.isdigit() or len(code) < 4):
+    # Qo'shimcha tekshiruv: Telegram kodi faqat 5 yoki 6 xonali raqam bo'lishi shart (yil sonlari emas)
+    if code and (not code.isdigit() or len(code) not in (5, 6) or code in ("2024", "2025", "2026", "2027", "2028")):
         code = None
 
     return code, password
@@ -321,8 +325,8 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
             return False, f"Diller botida '{button_action}' tugmasi topilmadi."
 
         if "code" in button_action.lower():
-            for _ in range(30):
-                await asyncio.sleep(1.5)
+            for _ in range(80):
+                await asyncio.sleep(0.4)
                 if not c.is_connected():
                     try:
                         await c.connect()
@@ -338,7 +342,7 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
                         return True, (code, password)
 
                 # 2. Yangi kelgan xabarlarni tekshirish (FAQAT diller_msg_id dan KEYINGI xabarlar!)
-                new_msgs = await c.get_messages(entity, min_id=diller_msg_id, limit=5)
+                new_msgs = await c.get_messages(entity, min_id=diller_msg_id, limit=4)
                 for m in new_msgs:
                     if not m or not m.text or m.id <= diller_msg_id:
                         continue
@@ -387,8 +391,8 @@ async def check_premium_from_diller(diller_username: str, diller_msg_id: int):
             return False, "Diller botida «Check premium» tugmasi topilmadi."
 
         # Diller boti javobini kutamiz (xabar matni o'zgarishi yoki yangi xabar)
-        for _ in range(8):
-            await asyncio.sleep(1)
+        for _ in range(16):
+            await asyncio.sleep(0.4)
             updated_msg = await c.get_messages(entity, ids=msg.id)
             new_msgs = await c.get_messages(entity, limit=3)
             all_msgs = ([updated_msg] if updated_msg else []) + [m for m in new_msgs if m]

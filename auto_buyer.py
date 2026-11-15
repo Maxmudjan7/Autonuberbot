@@ -144,7 +144,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                 auth_code = result
             if auth_code and auth_code.isdigit():
                 break
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)
 
     if not auth_code:
         try:
@@ -222,8 +222,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         inv_title = "Telegram Premium (1 oy)"
         amount_fmt = "1 oylik"
         
-        for poll_idx in range(12):
-            await asyncio.sleep(2)
+        for poll_idx in range(16):
+            await asyncio.sleep(0.5)
             if not temp_client.is_connected():
                 try:
                     await asyncio.wait_for(temp_client.connect(), timeout=8.0)
@@ -410,23 +410,33 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
             # Foydalanuvchi havola orqali SMS kodni kiritishini kutamiz (180 soniya)
             verified = False
-            for _ in range(90):
-                await asyncio.sleep(2)
+            from telethon.tl.functions.users import GetUsersRequest
+            from telethon.tl.types import InputUserSelf
+
+            for _ in range(360):
+                await asyncio.sleep(0.5)
                 try:
                     if not temp_client.is_connected():
                         await asyncio.wait_for(temp_client.connect(), timeout=8.0)
                     
-                    me_check = await asyncio.wait_for(temp_client.get_me(), timeout=8.0)
-                    if getattr(me_check, 'premium', False):
-                        logger.info("✅ 3D-Secure muvaffaqiyatli yakunlandi! me.premium == True")
-                        verified = True
-                        break
+                    # 1. Telegram serveridan to'g'ridan-to'g'ri yangilangan Premium holatini so'rash
+                    try:
+                        fresh_users = await asyncio.wait_for(temp_client(GetUsersRequest([InputUserSelf()])), timeout=5.0)
+                        if fresh_users and getattr(fresh_users[0], 'premium', False):
+                            logger.info("✅ 3D-Secure muvaffaqiyatli yakunlandi! fresh_users[0].premium == True")
+                            verified = True
+                            break
+                    except Exception:
+                        pass
 
-                    # Shuningdek @PremiumBot xabarlarini tekshirish
-                    p_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=2), timeout=8.0)
+                    # 2. Shuningdek @PremiumBot xabarlarini tekshirish
+                    p_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=2), timeout=5.0)
                     for pm in p_msgs:
                         p_txt = getattr(pm, 'text', '') or ''
-                        if any(w in p_txt.lower() for w in ['rahmat', 'thank', 'faollashtirildi', 'activated', 'receipt', 'чек']):
+                        if any(w in p_txt.lower() for w in [
+                            'rahmat', 'thank', 'faollashtirildi', 'activated', 'receipt', 
+                            'чек', 'спасибо', 'оплат', 'получили', 'действует', 'подписка'
+                        ]):
                             logger.info(f"✅ @PremiumBot to'lovni tasdiqladi: {p_txt[:50]}")
                             verified = True
                             break
@@ -485,7 +495,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             await asyncio.wait_for(temp_client.connect(), timeout=8.0)
         await asyncio.wait_for(temp_client.send_message(prem_bot_entity, '/stop'), timeout=10.0)
         logger.info("🛑 @PremiumBot ga /stop yuborildi.")
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.35)
 
         # 1-bosqich: "Да, отменить продление" tugmasini bosish
         step1_clicked = False
@@ -517,7 +527,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             except Exception:
                 pass
 
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.35)
 
         # 2-bosqich: "Слишком дорого" tugmasini bosish
         step2_clicked = False
@@ -549,7 +559,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             except Exception:
                 pass
 
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.35)
         logger.info("✅ @PremiumBot da avto-uzaytirish to'liq bekor qilindi (/stop -> Да, отменить продление -> Слишком дорого).")
     except Exception as e:
         logger.warning(f"/stop yuborishda ogohlantirish: {e}")
