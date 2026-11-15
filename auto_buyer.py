@@ -210,8 +210,9 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     # Raqam so'rash
     phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
     if not phone:
-        await status_callback(0, 6, "Bo'sh raqamlar yo'q", "❌ <b>Hozirda bo'sh raqamlar mavjud emas.</b>\n\nIltimos, birozdan so'ng qayta urinib ko'ring.", {"error": "no_number"})
-        return False, "Bo'sh raqamlar mavjud emas"
+        err_msg = err or "Hozirda bo'sh raqamlar mavjud emas."
+        await status_callback(0, 6, "Raqam olinmadi", f"❌ <b>{err_msg}</b>\n\nIltimos, birozdan so'ng qayta urinib ko'ring.", {"error": "no_number"})
+        return False, err_msg
 
     order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
     ctx["order_id"] = order_id

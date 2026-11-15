@@ -200,6 +200,12 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
                         phone = match_all.group(1).replace("+", "").strip()
                         return phone, msg.id, None
 
+                    # Diller bot ruxsat yo'q yoki boshqa sabab qaytarsa darhol xabar berish
+                    m_txt_lower = msg.text.lower()
+                    if any(w in m_txt_lower for w in ["ruxsat yo'q", "ruxsat yo‘q", "admin:", "balans", "kelishuv"]):
+                        logger.warning(f"Diller bot ({diller_username}) ogohlantirishi: {msg.text.strip()}")
+                        return None, None, f"Diller bot ({diller_username}): {msg.text.strip()}"
+
         return None, None, "Hozirda bo'sh raqamlar mavjud emas."
     except Exception as e:
         logger.error(f"Diller botdan raqam olishda xatolik: {e}")
