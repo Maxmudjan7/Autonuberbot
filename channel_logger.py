@@ -14,12 +14,15 @@ async def send_number_log(user_id: int, phone: str, diller_bot: str, mode: str =
     if not ch:
         return
     if not user_display:
-        user = database.get_user(user_id)
-        if user and user[1]:
-            user_display = f"@{user[1]}"
-        elif user and user[2]:
-            user_display = user[2]
-        else:
+        try:
+            user = database.get_user(user_id)
+            if user and user[1]:
+                user_display = f"@{user[1]}"
+            elif user and user[2]:
+                user_display = user[2]
+            else:
+                user_display = str(user_id)
+        except Exception:
             user_display = str(user_id)
 
     bot_name = diller_bot.replace('@', '')
@@ -44,12 +47,15 @@ async def send_payment_log(user_id: int, phone: str, reward_amount: str = "Teleg
     if not ch:
         return
     if not user_display:
-        user = database.get_user(user_id)
-        if user and user[1]:
-            user_display = f"@{user[1]}"
-        elif user and user[2]:
-            user_display = user[2]
-        else:
+        try:
+            user = database.get_user(user_id)
+            if user and user[1]:
+                user_display = f"@{user[1]}"
+            elif user and user[2]:
+                user_display = user[2]
+            else:
+                user_display = str(user_id)
+        except Exception:
             user_display = str(user_id)
 
     text = (

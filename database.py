@@ -3,7 +3,9 @@ import math
 from datetime import datetime, timedelta
 import crypto_utils
 
-DB_NAME = "bot_database.db"
+import os
+
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_database.db")
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME, timeout=30.0)
@@ -262,6 +264,14 @@ def register_or_get_user(user_id: int, username: str, full_name: str, is_admin_u
         status, premiums = row[1], row[2]
     conn.close()
     return status, premiums
+
+def get_user(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, username, full_name, status, balance FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 # Sozlamalar
 def get_setting(key: str, default: str = "") -> str:
