@@ -116,19 +116,6 @@ def init_db():
         )
     ''')
 
-    # Standart biriktirilgan foydalanuvchilar diller botlari
-    default_user_routes = [
-        (7559431670, '@bexruzprem3_bot'),
-        (6283064335, '@RePreCheapBot'),
-        (6278841173, '@RePreCheapBot')
-    ]
-    for uid, b_uname in default_user_routes:
-        cursor.execute('''
-            INSERT INTO user_diller_routes (user_id, diller_bot)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET diller_bot = excluded.diller_bot
-        ''', (uid, b_uname))
-
     # Foydalanuvchi to'lov kartalari jadvali (Telegram Premium uchun)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_cards (
@@ -816,11 +803,6 @@ def delete_user_diller_route(user_id: int):
 
 # Any botlar (Diller botlar)
 def get_active_diller_bot(user_id: int = None) -> str:
-    if user_id:
-        custom_bot = get_user_diller_route(user_id)
-        if custom_bot:
-            return custom_bot
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT bot_username FROM any_bots WHERE status = 'active' ORDER BY priority ASC LIMIT 1")
