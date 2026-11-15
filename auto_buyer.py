@@ -217,8 +217,11 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                     raise conn_err
                 await asyncio.sleep(2)
         
-        # Javoblar va to'lov chekini (Invoice) qidirish (Maksimal 30 soniya)
+        # Javoblar va to'lov chekini (Invoice) qidirish (Aynan 1 oylik obuna tanlanadi!)
         invoice_msg = None
+        inv_title = "Telegram Premium (1 oy)"
+        amount_fmt = "1 oylik"
+        
         for poll_idx in range(12):
             await asyncio.sleep(2)
             if not temp_client.is_connected():
@@ -233,37 +236,56 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                 logger.warning(f"@PremiumBot xabarlarini olishda ogohlantirish: {get_err}")
                 continue
 
+            # 1-oylik obuna tugmasini qidirib bosish (12, 6, 3 oyliklar emas, aynan 1 oylik!)
+            btn_clicked_this_turn = False
+            for m in msgs:
+                if m.buttons:
+                    for row in m.buttons:
+                        for btn in row:
+                            b_text = (btn.text or "").lower()
+                            # 12, 6, 3 oyliklarni chetlab o'tib, aynan 1 oylikni aniqlaymiz
+                            if ("12" not in b_text and "6" not in b_text and "3" not in b_text) and any(w in b_text for w in ["1", "oy", "month", "мес", "monthly", "ежемесячно"]):
+                                logger.info(f"✅ @PremiumBot 1-oylik obuna tugmasi topildi: '{btn.text}'. Bosilmoqda...")
+                                try:
+                                    await asyncio.wait_for(btn.click(), timeout=8.0)
+                                    btn_clicked_this_turn = True
+                                    await asyncio.sleep(2.5)
+                                    break
+                                except Exception as btn_err:
+                                    logger.warning(f"Tugmani bosishda ogohlantirish: {btn_err}")
+                        if btn_clicked_this_turn:
+                            break
+                if btn_clicked_this_turn:
+                    break
+
+            if btn_clicked_this_turn:
+                # Tugma bosilgach, yangilangan xabarlarni qayta olamiz
+                try:
+                    msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=5), timeout=10.0)
+                except Exception:
+                    pass
+
+            # Invoice (to'lov cheki) qidirish
             for m in msgs:
                 if m.media and hasattr(m.media, 'title'):
+                    m_title = (getattr(m.media, 'title', '') or '').lower()
+                    # Agar invoice 12 oylik yoki yillik bo'lsa va hali 1-oylik tugmani bosish imkoni bo'lsa, kutamiz
+                    if ("12" in m_title or "annual" in m_title or "year" in m_title) and poll_idx < 3:
+                        continue
                     invoice_msg = m
                     break
+
             if invoice_msg:
                 break
 
-            # Agar invoice chiqmasa, obuna/davomiylik tugmalarini bosib ko'rish
-            if poll_idx >= 1 and not invoice_msg:
-                btn_hit = False
-                for m in msgs:
-                    if m.buttons:
-                        for row in m.buttons:
-                            for btn in row:
-                                b_text = (btn.text or "").lower()
-                                if any(k in b_text for k in ["3", "oy", "month", "мес", "(-", "pay", "to'lash", "оплат", "subscr"]):
-                                    try:
-                                        logger.info(f"@PremiumBot tugmasi bosilmoqda: '{btn.text}'")
-                                        await asyncio.wait_for(btn.click(), timeout=8.0)
-                                        btn_hit = True
-                                        await asyncio.sleep(2)
-                                        break
-                                    except Exception as btn_err:
-                                        logger.warning(f"Tugmani bosishda xatolik: {btn_err}")
-                            if btn_hit:
-                                break
-                    if btn_hit:
-                        break
-
         if not invoice_msg:
             raise Exception("@PremiumBot dan to'lov cheki (Invoice) olinmadi!")
+
+        inv_title = getattr(invoice_msg.media, 'title', 'Telegram Premium 1 oy')
+        inv_amount = getattr(invoice_msg.media, 'total_amount', 0)
+        inv_curr = getattr(invoice_msg.media, 'currency', 'USD')
+        amount_fmt = f"{inv_amount / 100:.2f} {inv_curr}" if inv_amount else "1 oylik"
+        logger.info(f"✅ Tanlangan Invoice: title='{inv_title}', amount={amount_fmt}")
 
         # To'lov formasini olish
         if not temp_client.is_connected():
@@ -291,7 +313,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     mask_card = f"**** {card_number[-4:]}"
     await status_callback(
         5, 6, "Kartadan to'lov yuborilmoqda",
-        f"⭐️ @PremiumBot to'lovi tayyorlandi.\n💳 Karta (<code>{mask_card}</code>) orqali to'lov yuborilmoqda...",
+        f"⭐️ <b>{inv_title} ({amount_fmt})</b> tayyorlandi.\n💳 Karta (<code>{mask_card}</code>) orqali to'lov yuborilmoqda...",
         {"payment_url": payment_url}
     )
 
