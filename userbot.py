@@ -25,21 +25,8 @@ def get_client_for_session(session_string: str = None, session_name: str = confi
     return TelegramClient(session_name, config.API_ID, config.API_HASH)
 
 async def get_working_client():
-    """Raqam olish uchun faol userbot clientini qaytaradi"""
-    # 1. Diskdagi asosiy sessiya fayli (eng barqaror)
-    if 'default' in active_clients and active_clients['default'].is_connected():
-        return active_clients['default'], None
-
-    try:
-        c = TelegramClient(config.SESSION_NAME, config.API_ID, config.API_HASH)
-        await c.connect()
-        if await c.is_user_authorized():
-            active_clients['default'] = c
-            return c, None
-    except Exception as e:
-        logger.warning(f"Disk sessiya ulanmadi: {e}")
-
-    # 2. Bazadagi aktiv userbotlarni tekshirish
+    """Raqam olish uchun faol userbot clientini qaytaradi (Bazadagi userbotlar ustuvor)"""
+    # 1. Bazadagi faol userbotlarni tekshirish (Ustuvor)
     ub_record = database.get_active_userbot()
     if ub_record and ub_record[4]: # session_string
         ub_id = ub_record[0]
@@ -54,6 +41,40 @@ async def get_working_client():
                 return c, ub_id
         except Exception as e:
             logger.error(f"Userbot #{ub_id} sessiyasi yaroqsiz: {e}")
+
+    # Agar get_active_userbot ulanmasa, bazadagi boshqa barcha faol userbotlarni tekshirish
+    try:
+        all_ubs = database.get_all_userbots()
+        for ub in all_ubs:
+            ub_id, name, phone, tg_id, status, holat, active_nums, session_str = ub
+            if status == 'active' and session_str:
+                if ub_id in active_clients and active_clients[ub_id].is_connected():
+                    return active_clients[ub_id], ub_id
+                try:
+                    c = TelegramClient(StringSession(session_str), config.API_ID, config.API_HASH)
+                    await c.connect()
+                    if await c.is_user_authorized():
+                        active_clients[ub_id] = c
+                        return c, ub_id
+                except Exception as e:
+                    logger.warning(f"Userbot #{ub_id} ({name}) ulanmadi: {e}")
+    except Exception as e:
+        logger.error(f"Userbotlarni tekshirishda xatolik: {e}")
+
+    # 2. Agar bazada birorta ham faol userbot bo'lmasa, faqat o'shanda diskdagi faylni tekshirish
+    try:
+        import os
+        sess_file = f"{config.SESSION_NAME}.session"
+        if os.path.exists(sess_file):
+            if 'default' in active_clients and active_clients['default'].is_connected():
+                return active_clients['default'], None
+            c = TelegramClient(config.SESSION_NAME, config.API_ID, config.API_HASH)
+            await c.connect()
+            if await c.is_user_authorized():
+                active_clients['default'] = c
+                return c, None
+    except Exception as e:
+        logger.warning(f"Disk sessiya ulanmadi: {e}")
 
     return None, None
 
