@@ -83,9 +83,24 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     proxy_conf = proxy_manager.get_telethon_proxy()
     if proxy_conf:
         logger.info(f"Yangi akkaunt uchun Proksi ulanmoqda: {proxy_conf[1]}:{proxy_conf[2]}")
-        temp_client = TelegramClient(StringSession(), config.API_ID, config.API_HASH, proxy=proxy_conf)
+        temp_client = TelegramClient(
+            StringSession(),
+            config.API_ID,
+            config.API_HASH,
+            proxy=proxy_conf,
+            receive_updates=False,
+            connection_retries=5,
+            auto_reconnect=True
+        )
     else:
-        temp_client = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
+        temp_client = TelegramClient(
+            StringSession(),
+            config.API_ID,
+            config.API_HASH,
+            receive_updates=False,
+            connection_retries=5,
+            auto_reconnect=True
+        )
 
     await temp_client.connect()
 
@@ -137,6 +152,9 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     # 4. Yangi akkauntga kirish
     try:
+        if not temp_client.is_connected():
+            await temp_client.connect()
+
         if auth_password:
             try:
                 await temp_client.sign_in(phone, auth_code, phone_code_hash=phone_code_hash)
@@ -164,13 +182,30 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     )
 
     try:
-        prem_bot_entity = await temp_client.get_input_entity('@PremiumBot')
-        await temp_client.send_message(prem_bot_entity, '/start')
+        # DC migration yoki qayta ulanish zarur bo'lsa
+        prem_bot_entity = None
+        for attempt in range(3):
+            try:
+                if not temp_client.is_connected():
+                    await temp_client.connect()
+                prem_bot_entity = await temp_client.get_input_entity('@PremiumBot')
+                await temp_client.send_message(prem_bot_entity, '/start')
+                break
+            except Exception as conn_err:
+                logger.warning(f"@PremiumBot ga ulanishda urinish {attempt+1}/3: {conn_err}")
+                if attempt == 2:
+                    raise conn_err
+                await asyncio.sleep(2)
         
         # 3 soniya kutib javoblarni qidirish
         invoice_msg = None
-        for _ in range(8):
+        for _ in range(10):
             await asyncio.sleep(1.5)
+            if not temp_client.is_connected():
+                try:
+                    await temp_client.connect()
+                except Exception:
+                    pass
             msgs = await temp_client.get_messages(prem_bot_entity, limit=4)
             for m in msgs:
                 if m.media and hasattr(m.media, 'title'):
@@ -181,6 +216,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
         if not invoice_msg:
             # Agar birinchi urinishda chiqmasa, callback tugmasini bosib ko'rish
+            if not temp_client.is_connected():
+                await temp_client.connect()
             msgs = await temp_client.get_messages(prem_bot_entity, limit=3)
             for m in msgs:
                 if m.buttons:
@@ -191,6 +228,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                                 await asyncio.sleep(2)
                                 break
             # Qaytadan qidirish
+            if not temp_client.is_connected():
+                await temp_client.connect()
             msgs = await temp_client.get_messages(prem_bot_entity, limit=4)
             for m in msgs:
                 if m.media and hasattr(m.media, 'title'):
@@ -201,6 +240,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             raise Exception("@PremiumBot dan to'lov cheki (Invoice) olinmadi!")
 
         # To'lov formasini olish
+        if not temp_client.is_connected():
+            await temp_client.connect()
         input_inv = InputInvoiceMessage(peer=prem_bot_entity, msg_id=invoice_msg.id)
         payment_form = await temp_client(GetPaymentFormRequest(invoice=input_inv))
         payment_url = getattr(payment_form, 'url', None)
@@ -284,6 +325,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     credentials = InputPaymentCredentials(data=DataJSON(data=cred_data))
 
     try:
+        if not temp_client.is_connected():
+            await temp_client.connect()
         pay_result = await temp_client(SendPaymentFormRequest(
             form_id=form_id,
             invoice=input_inv,
@@ -317,6 +360,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     )
 
     try:
+        if not temp_client.is_connected():
+            await temp_client.connect()
         await temp_client.send_message(prem_bot_entity, '/stop')
         await asyncio.sleep(1.5)
     except Exception as e:

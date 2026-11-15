@@ -21,8 +21,8 @@ login_sessions = {}
 
 def get_client_for_session(session_string: str = None, session_name: str = config.SESSION_NAME):
     if session_string:
-        return TelegramClient(StringSession(session_string), config.API_ID, config.API_HASH)
-    return TelegramClient(session_name, config.API_ID, config.API_HASH)
+        return TelegramClient(StringSession(session_string), config.API_ID, config.API_HASH, receive_updates=False, connection_retries=5, auto_reconnect=True)
+    return TelegramClient(session_name, config.API_ID, config.API_HASH, receive_updates=False, connection_retries=5, auto_reconnect=True)
 
 async def get_working_client():
     """Raqam olish uchun faol userbot clientini qaytaradi (Bazadagi userbotlar ustuvor)"""
@@ -30,11 +30,18 @@ async def get_working_client():
     ub_record = database.get_active_userbot()
     if ub_record and ub_record[4]: # session_string
         ub_id = ub_record[0]
-        if ub_id in active_clients and active_clients[ub_id].is_connected():
-            return active_clients[ub_id], ub_id
+        if ub_id in active_clients:
+            c_cached = active_clients[ub_id]
+            if not c_cached.is_connected():
+                try:
+                    await c_cached.connect()
+                except Exception:
+                    pass
+            if c_cached.is_connected():
+                return c_cached, ub_id
         
         try:
-            c = TelegramClient(StringSession(ub_record[4]), config.API_ID, config.API_HASH)
+            c = TelegramClient(StringSession(ub_record[4]), config.API_ID, config.API_HASH, receive_updates=False, connection_retries=5, auto_reconnect=True)
             await c.connect()
             if await c.is_user_authorized():
                 active_clients[ub_id] = c
@@ -48,10 +55,17 @@ async def get_working_client():
         for ub in all_ubs:
             ub_id, name, phone, tg_id, status, holat, active_nums, session_str = ub
             if status == 'active' and session_str:
-                if ub_id in active_clients and active_clients[ub_id].is_connected():
-                    return active_clients[ub_id], ub_id
+                if ub_id in active_clients:
+                    c_cached = active_clients[ub_id]
+                    if not c_cached.is_connected():
+                        try:
+                            await c_cached.connect()
+                        except Exception:
+                            pass
+                    if c_cached.is_connected():
+                        return c_cached, ub_id
                 try:
-                    c = TelegramClient(StringSession(session_str), config.API_ID, config.API_HASH)
+                    c = TelegramClient(StringSession(session_str), config.API_ID, config.API_HASH, receive_updates=False, connection_retries=5, auto_reconnect=True)
                     await c.connect()
                     if await c.is_user_authorized():
                         active_clients[ub_id] = c
@@ -68,7 +82,7 @@ async def get_working_client():
         if os.path.exists(sess_file):
             if 'default' in active_clients and active_clients['default'].is_connected():
                 return active_clients['default'], None
-            c = TelegramClient(config.SESSION_NAME, config.API_ID, config.API_HASH)
+            c = TelegramClient(config.SESSION_NAME, config.API_ID, config.API_HASH, receive_updates=False, connection_retries=5, auto_reconnect=True)
             await c.connect()
             if await c.is_user_authorized():
                 active_clients['default'] = c
@@ -155,6 +169,8 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
         return None, None, "Faol Userbot hisobi topilmadi! Iltimos, «🤖 Userbotlar» bo'limidan akkaunt qo'shing."
 
     try:
+        if not c.is_connected():
+            await c.connect()
         try:
             entity = await c.get_input_entity(diller_username)
         except (UsernameNotOccupiedError, UsernameInvalidError, ValueError):
@@ -238,6 +254,8 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
         return False, "Userbot ulanmagan!"
 
     try:
+        if not c.is_connected():
+            await c.connect()
         entity = await c.get_input_entity(diller_username)
         msg = await c.get_messages(entity, ids=diller_msg_id)
         if not msg:
@@ -253,7 +271,12 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
         if msg.buttons:
             for row in msg.buttons:
                 for btn in row:
-                    if button_action.lower() in btn.text.lower():
+                    btn_text = btn.text.lower()
+                    if button_action.lower() in btn_text:
+                        await btn.click()
+                        clicked = True
+                        break
+                    if "code" in button_action.lower() and any(k in btn_text for k in ["code", "kod", "получить"]):
                         await btn.click()
                         clicked = True
                         break
@@ -262,15 +285,16 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
 
         if not clicked:
             action_map = {
-                "code": "code",
-                "freeze": "freeze",
-                "cancel": "cancel"
+                "code": ["code", "kod", "получить"],
+                "freeze": ["freeze", "muzlat"],
+                "cancel": ["cancel", "bekor", "отмен"]
             }
-            target_kw = action_map.get(button_action.lower(), button_action.lower())
+            target_kws = action_map.get(button_action.lower(), [button_action.lower()])
             if msg.buttons:
                 for row in msg.buttons:
                     for btn in row:
-                        if target_kw in btn.text.lower():
+                        btn_text = btn.text.lower()
+                        if any(kw in btn_text for kw in target_kws):
                             await btn.click()
                             clicked = True
                             break
@@ -283,6 +307,11 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
         if "code" in button_action.lower():
             for _ in range(25):
                 await asyncio.sleep(1)
+                if not c.is_connected():
+                    try:
+                        await c.connect()
+                    except Exception:
+                        pass
                 updated_msg = await c.get_messages(entity, ids=diller_msg_id)
                 new_msgs = await c.get_messages(entity, limit=4)
                 all_msgs = ([updated_msg] if updated_msg else []) + [m for m in new_msgs if m]

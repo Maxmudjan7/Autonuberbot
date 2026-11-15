@@ -5,4 +5,5 @@ python-dotenv>=1.0.0
 fastapi>=0.110.0
 uvicorn>=0.28.0
 PySocks>=1.7.1
+python-socks[asyncio]>=2.5.0
 cryptography>=42.0.0
