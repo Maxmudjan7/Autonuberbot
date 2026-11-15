@@ -35,10 +35,150 @@ logger = logging.getLogger(__name__)
 # Faol avto-buyurtmalar (order_id -> dict)
 active_auto_orders = {}
 
+async def cancel_auto_order(order_id: int) -> tuple[bool, str]:
+    """Foydalanuvchi tomonidan avto-buyurtmani bekor qilish"""
+    order_data = active_auto_orders.get(order_id)
+    if not order_data:
+        database.update_order_status(order_id, 'cancelled')
+        return True, "Buyurtma bekor qilindi ❌"
+
+    order_data["is_cancelled"] = True
+    
+    # 1. Diller botida raqamni bekor qilish
+    diller_bot = order_data.get("diller_bot")
+    diller_msg_id = order_data.get("diller_msg_id")
+    if diller_bot and diller_msg_id:
+        try:
+            await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
+        except Exception:
+            pass
+
+    # 2. Telethon mijozini uzish
+    client = order_data.get("temp_client")
+    if client:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    # 3. Bazada holatni yangilash
+    database.update_order_status(order_id, 'cancelled')
+
+    # 4. Foydalanuvchi status xabarini yangilash
+    cb = order_data.get("status_callback")
+    if cb:
+        try:
+            await cb(
+                0, 6, "Buyurtma bekor qilindi",
+                "❌ <b>Buyurtma foydalanuvchi tomonidan bekor qilindi.</b>",
+                {"error": "user_cancelled", "cancelled": True, "order_id": order_id}
+            )
+        except Exception:
+            pass
+
+    # 5. Taskni to'xtatish
+    task = order_data.get("task")
+    if task and not task.done():
+        task.cancel()
+
+    active_auto_orders.pop(order_id, None)
+    return True, "Buyurtma bekor qilindi ❌"
+
+async def resend_code_auto_order(order_id: int) -> tuple[bool, str]:
+    """Diller botidan va Telegramdan qayta kod so'rash"""
+    order_data = active_auto_orders.get(order_id)
+    if not order_data:
+        return False, "Buyurtma topilmadi yoki faol emas!"
+
+    diller_bot = order_data.get("diller_bot")
+    diller_msg_id = order_data.get("diller_msg_id")
+    phone = order_data.get("phone")
+    client = order_data.get("temp_client")
+    phone_code_hash = order_data.get("phone_code_hash")
+
+    # 1. Telegram orqali resend_code
+    if client and phone and phone_code_hash:
+        try:
+            await asyncio.wait_for(client.resend_code(phone, phone_code_hash), timeout=5.0)
+            logger.info(f"[{phone}] Telegram resend_code chaqirildi.")
+        except Exception as e:
+            logger.debug(f"Telegram resend_code ogohlantirish: {e}")
+
+    # 2. Diller botida Get Code tugmasini bosish
+    if diller_bot and diller_msg_id:
+        try:
+            await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code", expected_phone=phone)
+            logger.info(f"[{phone}] Diller botida Get Code qayta bosildi.")
+        except Exception as e:
+            logger.warning(f"Diller Get Code bosishda xatolik: {e}")
+
+    return True, "🔄 Kod diller botidan qayta so'ralmoqda, iltimos kuting..."
+
+async def check_3ds_payment_auto_order(order_id: int) -> tuple[bool, str]:
+    """Bank SMS to'lovi tasdiqlanganini darhol qo'lda tekshirish"""
+    order_data = active_auto_orders.get(order_id)
+    if not order_data:
+        return False, "Buyurtma topilmadi yoki yakunlangan!"
+
+    client = order_data.get("temp_client")
+    if not client:
+        return False, "Mijoz ulanmagan!"
+
+    from telethon.tl.functions.users import GetUsersRequest
+    from telethon.tl.types import InputUserSelf
+
+    try:
+        if not client.is_connected():
+            await client.connect()
+        fresh_users = await asyncio.wait_for(client(GetUsersRequest([InputUserSelf()])), timeout=5.0)
+        if fresh_users and getattr(fresh_users[0], 'premium', False):
+            order_data["payment_verified"] = True
+            return True, "✅ To'lov muvaffaqiyatli tasdiqlandi!"
+    except Exception as e:
+        logger.debug(f"Qo'lda 3DS tekshirishda xatolik: {e}")
+
+    return False, "⏳ Bank to'lovi hali tasdiqlanmadi. Iltimos, SMS kodni kiritib tasdiqlang."
+
 async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback):
     """
-    To'liq avtomatik jarayonni amalga oshiradi.
-    status_callback(step_num: int, total_steps: int, title: str, text: str, extra: dict)
+    To'liq avtomatik jarayonni boshqaradi va bekor qilish (cancellation) ni ushlaydi.
+    """
+    ctx = {}
+    try:
+        return await _inner_auto_purchase_flow(user_id, card_row, status_callback, ctx)
+    except asyncio.CancelledError:
+        order_id = ctx.get("order_id")
+        temp_client = ctx.get("temp_client")
+        diller_bot = ctx.get("diller_bot")
+        diller_msg_id = ctx.get("diller_msg_id")
+        phone = ctx.get("phone")
+        logger.info(f"[{phone}] Buyurtma #{order_id} foydalanuvchi tomonidan bekor qilindi.")
+        if temp_client:
+            try:
+                await temp_client.disconnect()
+            except Exception:
+                pass
+        if order_id:
+            database.update_order_status(order_id, 'cancelled')
+        if diller_bot and diller_msg_id:
+            try:
+                await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
+            except Exception:
+                pass
+        await status_callback(
+            0, 6, "Buyurtma bekor qilindi",
+            "❌ <b>Buyurtma foydalanuvchi tomonidan bekor qilindi.</b>",
+            {"error": "user_cancelled", "cancelled": True, "order_id": order_id}
+        )
+        return False, "Foydalanuvchi tomonidan bekor qilindi"
+    finally:
+        order_id = ctx.get("order_id")
+        if order_id:
+            active_auto_orders.pop(order_id, None)
+
+async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callback, ctx: dict):
+    """
+    Asosiy avtomatik xarid mantig'i.
     """
     if len(card_row) >= 10:
         card_id, card_number, exp_month, exp_year, cvv, cardholder_name, used_count, max_limit, card_status, is_def = card_row[:10]
@@ -73,6 +213,24 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         return False, "Bo'sh raqamlar mavjud emas"
 
     order_id = database.create_order(user_id, phone, diller_bot, diller_msg_id, duration_seconds=300)
+    ctx["order_id"] = order_id
+    ctx["phone"] = phone
+    ctx["diller_bot"] = diller_bot
+    ctx["diller_msg_id"] = diller_msg_id
+
+    order_data = {
+        "user_id": user_id,
+        "phone": phone,
+        "diller_bot": diller_bot,
+        "diller_msg_id": diller_msg_id,
+        "temp_client": None,
+        "phone_code_hash": None,
+        "is_cancelled": False,
+        "payment_verified": False,
+        "task": asyncio.current_task(),
+        "status_callback": status_callback
+    }
+    active_auto_orders[order_id] = order_data
 
     # 2. Yangi raqamga Telegram login so'rovini yuborish
     await status_callback(
@@ -103,6 +261,9 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             auto_reconnect=True
         )
 
+    order_data["temp_client"] = temp_client
+    ctx["temp_client"] = temp_client
+
     # temp_client uchun update_loop ni zararsizlantirish (crash va disconnect bo'lmasligi uchun)
     async def _noop_updates():
         while True:
@@ -114,6 +275,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     try:
         code_req = await asyncio.wait_for(temp_client.send_code_request(phone), timeout=20.0)
         phone_code_hash = code_req.phone_code_hash
+        order_data["phone_code_hash"] = phone_code_hash
     except Exception as e:
         logger.error(f"Telegram kod so'rashda xatolik: {e}")
         try:
@@ -122,20 +284,25 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
-        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e)})
+        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e), "order_id": order_id})
         return False, str(e)
+
+    if order_data.get("is_cancelled"):
+        raise asyncio.CancelledError()
 
     # 3. Diller botidan Get Code orqali kodni olish
     await status_callback(
         3, 6, "Tasdiqlash kodi kutilmoqda",
         f"📱 <b>Raqam:</b> <code>+{phone}</code>\n⏳ Telegram tasdiqlash kodi kutilmoqda...",
-        {"phone": phone}
+        {"phone": phone, "order_id": order_id}
     )
 
     # Dillerdan kodni kutish (expected_phone bilan aniq tekshirish)
     auth_code = None
     auth_password = None
     for _ in range(2):
+        if order_data.get("is_cancelled"):
+            raise asyncio.CancelledError()
         success, result = await userbot.click_diller_button(diller_bot, diller_msg_id, "Get Code", expected_phone=phone)
         if success:
             if isinstance(result, tuple):
@@ -154,15 +321,18 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         # Raqamni muzlatish yoki bekor qilish
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         database.update_order_status(order_id, 'frozen')
-        await status_callback(0, 6, "Kod kelmadi", f"❌ <b>+{phone}</b> raqamiga tasdiqlash kodi kelmadi. Raqam bekor qilindi.", {"error": "no_code"})
+        await status_callback(0, 6, "Kod kelmadi", f"❌ <b>+{phone}</b> raqamiga tasdiqlash kodi kelmadi. Raqam bekor qilindi.", {"error": "no_code", "order_id": order_id})
         return False, "Kod kelmadi"
+
+    if order_data.get("is_cancelled"):
+        raise asyncio.CancelledError()
 
     database.update_order_status(order_id, 'active', code=auth_code, password=auth_password)
 
     await status_callback(
         3, 6, "Kod olindi, akkauntga kirilmoqda",
         f"📱 Raqam: <code>+{phone}</code>\n🔑 <b>Kod:</b> <code>{auth_code}</code>" + (f"\n🔐 <b>Parol:</b> <code>{auth_password}</code>" if auth_password else "") + "\n\n🚀 Akkauntga kirilmoqda...",
-        {"phone": phone, "code": auth_code}
+        {"phone": phone, "code": auth_code, "order_id": order_id}
     )
 
     # 4. Yangi akkauntga kirish
@@ -414,6 +584,12 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             from telethon.tl.types import InputUserSelf
 
             for _ in range(360):
+                if order_data.get("is_cancelled"):
+                    raise asyncio.CancelledError()
+                if order_data.get("payment_verified"):
+                    verified = True
+                    break
+
                 await asyncio.sleep(0.5)
                 try:
                     if not temp_client.is_connected():
@@ -452,7 +628,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                     pass
                 database.update_order_status(order_id, 'cancelled')
                 await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
-                await status_callback(0, 6, "SMS tasdiqlanmadi", "❌ <b>Bank SMS kodi kiritilmadi yoki to'lov tasdiqlanmadi (vaqt tugadi).</b>\n\nBuyurtma bekor qilindi.", {"error": "3ds_timeout"})
+                await status_callback(0, 6, "SMS tasdiqlanmadi", "❌ <b>Bank SMS kodi kiritilmadi yoki to'lov tasdiqlanmadi (vaqt tugadi).</b>\n\nBuyurtma bekor qilindi.", {"error": "3ds_timeout", "order_id": order_id})
                 return False, "3D-Secure SMS tasdiqlanmadi"
 
         elif isinstance(pay_result, PaymentResult):
@@ -480,14 +656,14 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         else:
             user_msg = f"❌ To'lovni amalga oshirib bo'lmadi: {err_str}"
 
-        await status_callback(0, 6, "To'lovda xatolik", user_msg, {"error": str(e)})
+        await status_callback(0, 6, "To'lovda xatolik", user_msg, {"error": str(e), "order_id": order_id})
         return False, str(e)
 
     # 8. Muvaffaqiyat! @PremiumBot da /stop bosish (Avto-uzaytirishni bekor qilish)
     await status_callback(
         6, 6, "Premium olindi, yakunlanmoqda",
         f"🎉 <b>Telegram Premium muvaffaqiyatli sotib olindi!</b>\n\n🛑 @PremiumBot da avto-uzaytirish bekor qilinmoqda (/stop)...",
-        {"phone": phone}
+        {"phone": phone, "order_id": order_id}
     )
 
     try:
@@ -572,7 +748,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             await status_callback(
                 6, 6, "BestBit bonusi olinmoqda",
                 f"🎉 <b>Telegram Premium faollashtirildi!</b>\n\n🎰 BestBit spin aylantirilib, kanalga chek yuborilmoqda...",
-                {"phone": phone}
+                {"phone": phone, "order_id": order_id}
             )
             bestbit_res = await bestbit_service.run_bestbit_flow(temp_client, phone)
         except Exception as bb_err:

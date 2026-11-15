@@ -689,14 +689,33 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
         step_header = f"[{step_num}/{total_steps}]" if step_num > 0 else "⚠️"
         full_text = f"⚡️ <b>AVTO-PREMIUM {step_header}</b>\n\n{text}"
         
+        order_id = extra.get("order_id")
         kb = None
-        if extra.get("error") or extra.get("completed"):
-            kb = get_back_to_menu_keyboard()
-        elif extra.get("needs_sms") and extra.get("verification_url"):
+        
+        if extra.get("error") or extra.get("cancelled"):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
+                [InlineKeyboardButton(text="⚡️ Qayta urinib ko'rish", callback_data="user_get_auto_premium")],
                 [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu")]
             ])
+        elif extra.get("completed"):
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⚡️ Yana Premium olish", callback_data="user_get_auto_premium")],
+                [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu")]
+            ])
+        elif extra.get("needs_sms") and extra.get("verification_url"):
+            # 5-bosqich: Bank SMS / 3D-Secure
+            buttons = [
+                [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
+            ]
+            row2 = []
+            if order_id:
+                row2.append(InlineKeyboardButton(text="🔄 To'lovni tekshirish", callback_data=f"auto_check_3ds_{order_id}"))
+                row2.append(InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"auto_cancel_{order_id}"))
+            else:
+                row2.append(InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu"))
+            buttons.append(row2)
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
             # 🔔 DIQQAT: edit_text ovozsiz bo'lgani sababli, yangi xabar yuborib bildirishnoma (ovoz) beramiz
             try:
                 await bot.send_message(
@@ -706,12 +725,24 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
                         "To'lovni tasdiqlash uchun darhol pastdagi tugmani bosing va SMS kodni kiriting:"
                     ),
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])]
-                    ])
+                    reply_markup=kb
                 )
             except Exception as notify_err:
                 logger.warning(f"3DS bildirishnoma yuborishda ogohlantirish: {notify_err}")
+
+        elif step_num == 3 and order_id:
+            # 3-bosqich: Telegram tasdiqlash kodi kutilmoqda
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🔄 Qayta kod olish", callback_data=f"auto_resend_{order_id}"),
+                    InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"auto_cancel_{order_id}")
+                ]
+            ])
+        elif order_id and step_num in (1, 2, 4):
+            # 1, 2, 4-bosqichlarda bekor qilish imkoni
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"auto_cancel_{order_id}")]
+            ])
 
         try:
             await status_msg.edit_text(full_text, parse_mode="HTML", reply_markup=kb)
@@ -724,12 +755,55 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
                     user_id,
                     "🎉 <b>Premium muvaffaqiyatli sotib olindi va avto-uzaytirish bekor qilindi!</b>",
                     parse_mode="HTML",
-                    reply_markup=get_back_to_menu_keyboard()
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="⚡️ Yana Premium olish", callback_data="user_get_auto_premium")],
+                        [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu")]
+                    ])
                 )
             except Exception:
                 pass
 
     asyncio.create_task(auto_buyer.run_auto_purchase_flow(user_id, active_card, update_status))
+
+
+# ==========================================
+# AVTO-PREMIUM BOSHQARUV TUGMALARI (CANCEL, RESEND, 3DS CHECK)
+# ==========================================
+
+@dp.callback_query(F.data.startswith("auto_cancel_"))
+async def handle_auto_cancel_order(call: types.CallbackQuery):
+    try:
+        order_id = int(call.data.split("_")[2])
+    except Exception:
+        await call.answer("Buyurtma topilmadi!", show_alert=True)
+        return
+
+    success, msg = await auto_buyer.cancel_auto_order(order_id)
+    await call.answer(msg, show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("auto_resend_"))
+async def handle_auto_resend_code(call: types.CallbackQuery):
+    try:
+        order_id = int(call.data.split("_")[2])
+    except Exception:
+        await call.answer("Buyurtma topilmadi!", show_alert=True)
+        return
+
+    success, msg = await auto_buyer.resend_code_auto_order(order_id)
+    await call.answer(msg, show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("auto_check_3ds_"))
+async def handle_auto_check_3ds(call: types.CallbackQuery):
+    try:
+        order_id = int(call.data.split("_")[3])
+    except Exception:
+        await call.answer("Buyurtma topilmadi!", show_alert=True)
+        return
+
+    success, msg = await auto_buyer.check_3ds_payment_auto_order(order_id)
+    await call.answer(msg, show_alert=True)
 
 
 # ==========================================
@@ -937,6 +1011,13 @@ async def handle_callback_freeze(call: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("cancel_"))
 async def handle_callback_cancel(call: types.CallbackQuery):
     order_id = int(call.data.split("_")[1])
+    
+    # Agar faol avto-buyurtma bo'lsa, uni to'liq bekor qilamiz
+    if order_id in auto_buyer.active_auto_orders:
+        await auto_buyer.cancel_auto_order(order_id)
+        await call.answer("Buyurtma bekor qilindi ❌", show_alert=True)
+        return
+
     order = database.get_order(order_id)
     if not order or order[6] != 'active':
         await call.answer("Buyurtma faol emas!", show_alert=True)
