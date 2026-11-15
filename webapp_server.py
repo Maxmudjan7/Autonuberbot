@@ -166,7 +166,7 @@ async def api_get_number(request):
             }
         })
 
-    diller_bot = database.get_active_diller_bot()
+    diller_bot = database.get_active_diller_bot(user_id=user_id)
     if not diller_bot:
         return json_response({"success": False, "error": "Hozirda raqam olish xizmati vaqtincha to'xtatilgan."})
 

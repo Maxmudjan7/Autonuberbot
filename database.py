@@ -105,6 +105,28 @@ def init_db():
         )
     ''')
 
+    # Foydalanuvchilar bo'yicha Diller bot marshrutlari
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_diller_routes (
+            user_id INTEGER PRIMARY KEY,
+            diller_bot TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Standart biriktirilgan foydalanuvchilar diller botlari
+    default_user_routes = [
+        (7559431670, '@bexruzprem3_bot'),
+        (6283064335, '@RePreCheapBot'),
+        (6278841173, '@RePreCheapBot')
+    ]
+    for uid, b_uname in default_user_routes:
+        cursor.execute('''
+            INSERT INTO user_diller_routes (user_id, diller_bot)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET diller_bot = excluded.diller_bot
+        ''', (uid, b_uname))
+
     # Foydalanuvchi to'lov kartalari jadvali (Telegram Premium uchun)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_cards (
@@ -722,16 +744,81 @@ def is_admin(user_id: int, main_admin_id: int) -> bool:
     conn.close()
     return bool(row)
 
+# Foydalanuvchilar bo'yicha Diller bot marshrutlash (User Routing)
+def set_user_diller_route(user_id: int, diller_bot: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_diller_routes (
+            user_id INTEGER PRIMARY KEY,
+            diller_bot TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO user_diller_routes (user_id, diller_bot, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE SET diller_bot = excluded.diller_bot, updated_at = CURRENT_TIMESTAMP
+    """, (user_id, diller_bot.strip()))
+    conn.commit()
+    conn.close()
+
+def get_user_diller_route(user_id: int) -> str | None:
+    if not user_id:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_diller_routes (
+            user_id INTEGER PRIMARY KEY,
+            diller_bot TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT diller_bot FROM user_diller_routes WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row and row[0]:
+        return row[0].strip()
+    return None
+
+def get_all_user_diller_routes():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_diller_routes (
+            user_id INTEGER PRIMARY KEY,
+            diller_bot TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT user_id, diller_bot FROM user_diller_routes ORDER BY user_id ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def delete_user_diller_route(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_diller_routes WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
 # Any botlar (Diller botlar)
-def get_active_diller_bot() -> str:
+def get_active_diller_bot(user_id: int = None) -> str:
+    if user_id:
+        custom_bot = get_user_diller_route(user_id)
+        if custom_bot:
+            return custom_bot
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT bot_username FROM any_bots WHERE status = 'active' ORDER BY priority ASC LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-    if row:
-        return row[0]
-    return get_setting("diller_bot_username", "")
+    if row and row[0]:
+        return row[0].strip()
+    return get_setting("diller_bot_username", "@Bexruzprem3_bot")
 
 def get_all_any_bots():
     conn = get_connection()

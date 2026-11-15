@@ -29,6 +29,7 @@ import userbot
 import smart_glocal
 import bestbit_service
 import proxy_manager
+import channel_logger
 
 logger = logging.getLogger(__name__)
 
@@ -195,8 +196,8 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
         )
         return False, "Karta limiti to'lgan"
 
-    # 1. Diller botini aniqlash
-    diller_bot = database.get_active_diller_bot()
+    # 1. Diller botini aniqlash (Foydalanuvchi marshrutiga asosan)
+    diller_bot = database.get_active_diller_bot(user_id=user_id)
     if not diller_bot:
         await status_callback(0, 6, "Xizmat vaqtincha to'xtatilgan", "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring.", {"error": "service_unavailable"})
         return False, "Diller boti topilmadi"
@@ -217,6 +218,9 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     ctx["phone"] = phone
     ctx["diller_bot"] = diller_bot
     ctx["diller_msg_id"] = diller_msg_id
+
+    # Guruh/kanalga Number logini yuborish
+    asyncio.create_task(channel_logger.send_number_log(user_id, phone, diller_bot, mode="Avto-Premium"))
 
     order_data = {
         "user_id": user_id,
@@ -764,6 +768,9 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     # 10. Kartadan foydalanish sonini oshirish
     limit_reached = database.increment_card_usage(card_id)
     database.update_order_status(order_id, 'completed')
+
+    # Guruh/kanalga to'lov logini yuborish
+    asyncio.create_task(channel_logger.send_payment_log(user_id, phone, reward_amount="Telegram Premium (1 oy)"))
 
     # Hisobot matni
     final_text = (

@@ -24,6 +24,7 @@ import config
 import database
 import userbot
 import auto_buyer
+import channel_logger
 
 logging.basicConfig(
     level=logging.INFO,
@@ -838,7 +839,7 @@ async def handle_get_number_manual(event: types.Message | types.CallbackQuery):
             await event.answer(warn_text, parse_mode="HTML", reply_markup=kb)
         return
 
-    diller_bot = database.get_active_diller_bot()
+    diller_bot = database.get_active_diller_bot(user_id=user_id)
     if not diller_bot:
         msg_text = "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring."
         if is_callback:
