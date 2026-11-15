@@ -484,7 +484,32 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         if not temp_client.is_connected():
             await asyncio.wait_for(temp_client.connect(), timeout=8.0)
         await asyncio.wait_for(temp_client.send_message(prem_bot_entity, '/stop'), timeout=10.0)
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(0.8)
+
+        # /stop dan keyingi tasdiqlash tugmalarini bosish (2 bosqichli tasdiq)
+        for conf_step in range(2):
+            await asyncio.sleep(0.6)
+            try:
+                stop_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=3), timeout=6.0)
+                btn_clicked = False
+                for sm in stop_msgs:
+                    if sm.buttons:
+                        for row in sm.buttons:
+                            for btn in row:
+                                b_txt = (btn.text or "").lower()
+                                # Obunani to'xtatishni tasdiqlash tugmalari:
+                                if any(w in b_txt for w in ["отмен", "stop", "to'xtat", "bekor", "да", "yes", "подтверд", "confirm"]):
+                                    logger.info(f"🛑 @PremiumBot avto-uzaytirishni bekor qilish tugmasi #{conf_step+1} bosildi: '{btn.text}'")
+                                    await asyncio.wait_for(btn.click(), timeout=6.0)
+                                    btn_clicked = True
+                                    await asyncio.sleep(0.8)
+                                    break
+                            if btn_clicked:
+                                break
+                    if btn_clicked:
+                        break
+            except Exception as conf_err:
+                logger.debug(f"/stop tasdiqlash bosqichida ogohlantirish: {conf_err}")
     except Exception as e:
         logger.warning(f"/stop yuborishda ogohlantirish: {e}")
 
