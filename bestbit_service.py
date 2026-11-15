@@ -50,11 +50,11 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
                                 if pat.lower() in text.lower():
                                     logger.info(f"Tugma topildi: '{text}' (mos pattern: '{pat}'). Bosilmoqda...")
                                     try:
-                                        await btn.click()
-                                        return True, m
-                                    except Exception as click_err:
-                                        logger.warning(f"Tugma bosishda ogohlantirish: {click_err}")
-                                        return True, m
+                                        # DIQQAT: Bot callback answer qaytarmasa Telethon 18-60 soniya kutib qolmasligi uchun timeout 1.2s
+                                        await asyncio.wait_for(btn.click(), timeout=1.2)
+                                    except (asyncio.TimeoutError, Exception) as click_err:
+                                        logger.debug(f"Tugma bosish so'rovi yuborildi ({click_err})")
+                                    return True, m
             if found_buttons and attempt == max_wait - 1:
                 logger.info(f"Kutilgan patternlar: {pattern_texts}, mavjud tugmalar: {found_buttons}")
         except Exception as e:
