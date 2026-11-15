@@ -24,10 +24,10 @@ import database
 
 logger = logging.getLogger(__name__)
 
-async def click_button_with_text(client: TelegramClient, entity, pattern_texts: list, max_wait: int = 5, sleep_between: float = 0.25):
+async def click_button_with_text(client: TelegramClient, entity, pattern_texts: list, max_wait: int = 15, sleep_between: float = 0.3):
     """
     Bot xabarlaridagi inline tugmalardan matn bo'yicha tezkor qidirib bosadi.
-    Birinchi urinishda darhol tekshiradi (kutmasdan).
+    Tugma paydo bo'lishi bilan darhol bosadi va qaytadi (kutib o'tirmaydi).
     """
     for attempt in range(max_wait):
         if attempt > 0:
@@ -38,7 +38,7 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
                     await client.connect()
                 except Exception:
                     pass
-            msgs = await client.get_messages(entity, limit=4)
+            msgs = await client.get_messages(entity, limit=5)
             found_buttons = []
             for m in msgs:
                 if m.buttons:
@@ -50,8 +50,7 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
                                 if pat.lower() in text.lower():
                                     logger.info(f"Tugma topildi: '{text}' (mos pattern: '{pat}'). Bosilmoqda...")
                                     try:
-                                        # DIQQAT: Bot callback answer qaytarmasa Telethon 18-60 soniya kutib qolmasligi uchun timeout 1.2s
-                                        await asyncio.wait_for(btn.click(), timeout=1.2)
+                                        await asyncio.wait_for(btn.click(), timeout=1.5)
                                     except (asyncio.TimeoutError, Exception) as click_err:
                                         logger.debug(f"Tugma bosish so'rovi yuborildi ({click_err})")
                                     return True, m
@@ -104,65 +103,65 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
         await asyncio.sleep(0.25)
 
         # 3. 'Бонус спин' tugmasini bosish
-        spin_btn_clicked, _ = await click_button_with_text(client, bot_entity, ["Бонус спин", "бонус", "bonus spin", "bonus"], max_wait=4, sleep_between=0.2)
+        spin_btn_clicked, _ = await click_button_with_text(client, bot_entity, ["бонус спин", "бонус", "bonus spin", "bonus"], max_wait=12, sleep_between=0.3)
         if not spin_btn_clicked:
             logger.warning(f"[{phone}] 'Бонус спин' tugmasi topilmadi yoki bosilmadi!")
 
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)
 
         # 4. 'Крутить' tugmasini bosish
-        krutit_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить", "spin", "roll"], max_wait=4, sleep_between=0.2)
+        krutit_clicked, _ = await click_button_with_text(client, bot_entity, ["крутить", "spin", "roll"], max_wait=12, sleep_between=0.3)
         if krutit_clicked:
             logger.info(f"[{phone}] 1-marta slot aylantirilmoqda, kutilmoqda...")
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.5)
         else:
             logger.warning(f"[{phone}] 'Крутить' tugmasi topilmadi!")
 
         # 5. 'Забрать спин' tugmasini bosish
-        zabrat_clicked, _ = await click_button_with_text(client, bot_entity, ["Забрать спин", "Забрать", "claim spin", "claim"], max_wait=4, sleep_between=0.2)
+        zabrat_clicked, _ = await click_button_with_text(client, bot_entity, ["забрать спин", "забрать", "claim free spin", "claim spin", "claim"], max_wait=12, sleep_between=0.3)
         if zabrat_clicked:
             logger.info(f"[{phone}] 'Забрать спин' bosildi.")
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.5)
 
         # 6. Yana 'Крутить' tugmasini bosish
-        krutit2_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить", "spin", "roll"], max_wait=4, sleep_between=0.2)
+        krutit2_clicked, _ = await click_button_with_text(client, bot_entity, ["крутить", "spin", "roll"], max_wait=12, sleep_between=0.3)
         if krutit2_clicked:
             logger.info(f"[{phone}] 2-marta slot aylantirilmoqda, kutilmoqda...")
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.5)
 
         # 7. Qaytadan /start yuborish
         if not client.is_connected():
             await client.connect()
         await client.send_message(bot_entity, "/start")
         logger.info(f"[{phone}] Menyuga qaytish uchun /start yuborildi.")
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.8)
 
         # 8. 'Чеки' tugmasini bosish
-        cheki_clicked, _ = await click_button_with_text(client, bot_entity, ["Чеки", "cheques", "checks", "чек", "check"], max_wait=4, sleep_between=0.2)
+        cheki_clicked, _ = await click_button_with_text(client, bot_entity, ["чеки", "cheques", "checks", "чек", "check"], max_wait=15, sleep_between=0.3)
         if not cheki_clicked:
             logger.warning(f"[{phone}] 'Чеки' tugmasi topilmadi!")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)
 
         # 9. 'Создать чек' tugmasini bosish
-        create_chk_clicked, _ = await click_button_with_text(client, bot_entity, ["Создать чек", "create cheque", "create check", "create"], max_wait=4, sleep_between=0.2)
+        create_chk_clicked, _ = await click_button_with_text(client, bot_entity, ["создать чек", "create cheque", "create check", "create"], max_wait=15, sleep_between=0.3)
         if not create_chk_clicked:
             logger.warning(f"[{phone}] 'Создать чек' tugmasi topilmadi!")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)
 
         # 10. Summa tanlashda 'Макс.' tugmasini bosish
-        max_sum_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс.", "Макс", "max.", "max"], max_wait=4, sleep_between=0.2)
+        max_sum_clicked, _ = await click_button_with_text(client, bot_entity, ["макс.", "макс", "max.", "max"], max_wait=15, sleep_between=0.3)
         if not max_sum_clicked:
             logger.warning(f"[{phone}] 'Макс.' summa tugmasi topilmadi!")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)
 
         # 11. Aktivatsiyalar sonida 'Макс. активаций' tugmasini bosish
-        max_act_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс. активаций", "Макс", "max activations", "max"], max_wait=4, sleep_between=0.2)
+        max_act_clicked, _ = await click_button_with_text(client, bot_entity, ["макс. активаций", "макс", "max activations", "max"], max_wait=15, sleep_between=0.3)
         if not max_act_clicked:
             logger.warning(f"[{phone}] 'Макс. активаций' tugmasi topilmadi!")
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.5)
 
         # 12. 'Копировать' tugmasini bosib ko'rish va chek havolasini qidirish
-        await click_button_with_text(client, bot_entity, ["Копировать", "копировать", "copy", "copy link"], max_wait=3, sleep_between=0.2)
+        await click_button_with_text(client, bot_entity, ["копировать", "copy link", "copy"], max_wait=10, sleep_between=0.3)
 
         check_link = None
         msgs = await client.get_messages(bot_entity, limit=4)
