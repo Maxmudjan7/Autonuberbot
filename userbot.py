@@ -1,6 +1,7 @@
 import asyncio
 import re
 import logging
+import telethon_patch
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (

@@ -37,11 +37,13 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
                 except Exception:
                     pass
             msgs = await client.get_messages(entity, limit=4)
+            found_buttons = []
             for m in msgs:
                 if m.buttons:
                     for row in m.buttons:
                         for btn in row:
                             text = getattr(btn, 'text', '') or ''
+                            found_buttons.append(text)
                             for pat in pattern_texts:
                                 if pat.lower() in text.lower():
                                     logger.info(f"Tugma topildi: '{text}' (mos pattern: '{pat}'). Bosilmoqda...")
@@ -51,6 +53,8 @@ async def click_button_with_text(client: TelegramClient, entity, pattern_texts: 
                                     except Exception as click_err:
                                         logger.warning(f"Tugma bosishda ogohlantirish: {click_err}")
                                         return True, m
+            if found_buttons and _ == max_wait - 1:
+                logger.info(f"Kutilgan patternlar: {pattern_texts}, mavjud tugmalar: {found_buttons}")
         except Exception as e:
             logger.warning(f"Tugma qidirishda xatolik: {e}")
     return False, None

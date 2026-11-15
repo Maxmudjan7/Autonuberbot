@@ -15,6 +15,7 @@ Zanjir:
 import asyncio
 import logging
 import json
+import telethon_patch
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
@@ -102,14 +103,23 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             auto_reconnect=True
         )
 
-    await temp_client.connect()
+    # temp_client uchun update_loop ni zararsizlantirish (crash va disconnect bo'lmasligi uchun)
+    async def _noop_updates():
+        while True:
+            await asyncio.sleep(3600)
+    temp_client._update_loop = _noop_updates
+
+    await asyncio.wait_for(temp_client.connect(), timeout=15.0)
 
     try:
-        code_req = await temp_client.send_code_request(phone)
+        code_req = await asyncio.wait_for(temp_client.send_code_request(phone), timeout=20.0)
         phone_code_hash = code_req.phone_code_hash
     except Exception as e:
         logger.error(f"Telegram kod so'rashda xatolik: {e}")
-        await temp_client.disconnect()
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
         await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e)})
@@ -137,7 +147,10 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         await asyncio.sleep(2)
 
     if not auth_code:
-        await temp_client.disconnect()
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
         # Raqamni muzlatish yoki bekor qilish
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         database.update_order_status(order_id, 'frozen')
@@ -155,24 +168,27 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     # 4. Yangi akkauntga kirish
     try:
         if not temp_client.is_connected():
-            await temp_client.connect()
+            await asyncio.wait_for(temp_client.connect(), timeout=10.0)
 
         if auth_password:
             try:
-                await temp_client.sign_in(phone, auth_code, phone_code_hash=phone_code_hash)
+                await asyncio.wait_for(temp_client.sign_in(phone, auth_code, phone_code_hash=phone_code_hash), timeout=15.0)
             except SessionPasswordNeededError:
-                await temp_client.sign_in(password=auth_password)
+                await asyncio.wait_for(temp_client.sign_in(password=auth_password), timeout=15.0)
         else:
             try:
-                await temp_client.sign_in(phone, auth_code, phone_code_hash=phone_code_hash)
+                await asyncio.wait_for(temp_client.sign_in(phone, auth_code, phone_code_hash=phone_code_hash), timeout=15.0)
             except SessionPasswordNeededError:
                 if auth_password:
-                    await temp_client.sign_in(password=auth_password)
+                    await asyncio.wait_for(temp_client.sign_in(password=auth_password), timeout=15.0)
                 else:
                     raise Exception("2FA Parol talab qilindi, lekin parol mavjud emas!")
     except Exception as e:
         logger.error(f"Akkauntga login xatosi: {e}")
-        await temp_client.disconnect()
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         await status_callback(0, 6, "Kirishda xatolik", f"❌ Akkauntga kirib bo'lmadi: {e}", {"error": str(e)})
@@ -191,9 +207,9 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         for attempt in range(3):
             try:
                 if not temp_client.is_connected():
-                    await temp_client.connect()
-                prem_bot_entity = await temp_client.get_input_entity('@PremiumBot')
-                await temp_client.send_message(prem_bot_entity, '/start')
+                    await asyncio.wait_for(temp_client.connect(), timeout=10.0)
+                prem_bot_entity = await asyncio.wait_for(temp_client.get_input_entity('@PremiumBot'), timeout=15.0)
+                await asyncio.wait_for(temp_client.send_message(prem_bot_entity, '/start'), timeout=15.0)
                 break
             except Exception as conn_err:
                 logger.warning(f"@PremiumBot ga ulanishda urinish {attempt+1}/3: {conn_err}")
@@ -201,16 +217,22 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                     raise conn_err
                 await asyncio.sleep(2)
         
-        # 3 soniya kutib javoblarni qidirish
+        # Javoblar va to'lov chekini (Invoice) qidirish (Maksimal 30 soniya)
         invoice_msg = None
-        for _ in range(10):
-            await asyncio.sleep(1.5)
+        for poll_idx in range(12):
+            await asyncio.sleep(2)
             if not temp_client.is_connected():
                 try:
-                    await temp_client.connect()
+                    await asyncio.wait_for(temp_client.connect(), timeout=8.0)
                 except Exception:
                     pass
-            msgs = await temp_client.get_messages(prem_bot_entity, limit=4)
+
+            try:
+                msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=5), timeout=10.0)
+            except Exception as get_err:
+                logger.warning(f"@PremiumBot xabarlarini olishda ogohlantirish: {get_err}")
+                continue
+
             for m in msgs:
                 if m.media and hasattr(m.media, 'title'):
                     invoice_msg = m
@@ -218,36 +240,36 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             if invoice_msg:
                 break
 
-        if not invoice_msg:
-            # Agar birinchi urinishda chiqmasa, callback tugmasini bosib ko'rish
-            if not temp_client.is_connected():
-                await temp_client.connect()
-            msgs = await temp_client.get_messages(prem_bot_entity, limit=3)
-            for m in msgs:
-                if m.buttons:
-                    for row in m.buttons:
-                        for btn in row:
-                            if "(-" in btn.text or "oy" in btn.text.lower() or "month" in btn.text.lower():
-                                await btn.click()
-                                await asyncio.sleep(2)
+            # Agar invoice chiqmasa, obuna/davomiylik tugmalarini bosib ko'rish
+            if poll_idx >= 1 and not invoice_msg:
+                btn_hit = False
+                for m in msgs:
+                    if m.buttons:
+                        for row in m.buttons:
+                            for btn in row:
+                                b_text = (btn.text or "").lower()
+                                if any(k in b_text for k in ["3", "oy", "month", "мес", "(-", "pay", "to'lash", "оплат", "subscr"]):
+                                    try:
+                                        logger.info(f"@PremiumBot tugmasi bosilmoqda: '{btn.text}'")
+                                        await asyncio.wait_for(btn.click(), timeout=8.0)
+                                        btn_hit = True
+                                        await asyncio.sleep(2)
+                                        break
+                                    except Exception as btn_err:
+                                        logger.warning(f"Tugmani bosishda xatolik: {btn_err}")
+                            if btn_hit:
                                 break
-            # Qaytadan qidirish
-            if not temp_client.is_connected():
-                await temp_client.connect()
-            msgs = await temp_client.get_messages(prem_bot_entity, limit=4)
-            for m in msgs:
-                if m.media and hasattr(m.media, 'title'):
-                    invoice_msg = m
-                    break
+                    if btn_hit:
+                        break
 
         if not invoice_msg:
             raise Exception("@PremiumBot dan to'lov cheki (Invoice) olinmadi!")
 
         # To'lov formasini olish
         if not temp_client.is_connected():
-            await temp_client.connect()
+            await asyncio.wait_for(temp_client.connect(), timeout=8.0)
         input_inv = InputInvoiceMessage(peer=prem_bot_entity, msg_id=invoice_msg.id)
-        payment_form = await temp_client(GetPaymentFormRequest(invoice=input_inv))
+        payment_form = await asyncio.wait_for(temp_client(GetPaymentFormRequest(invoice=input_inv)), timeout=20.0)
         payment_url = getattr(payment_form, 'url', None)
         form_id = getattr(payment_form, 'form_id', None)
 
@@ -256,7 +278,10 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     except Exception as e:
         logger.error(f"@PremiumBot bilan ishlashda xatolik: {e}")
-        await temp_client.disconnect()
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         await status_callback(0, 6, "@PremiumBot xatosi", f"❌ @PremiumBot bilan ishlashda xatolik: {e}", {"error": str(e)})
@@ -334,13 +359,13 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     try:
         if not temp_client.is_connected():
-            await temp_client.connect()
-        pay_result = await temp_client(SendPaymentFormRequest(
+            await asyncio.wait_for(temp_client.connect(), timeout=8.0)
+        pay_result = await asyncio.wait_for(temp_client(SendPaymentFormRequest(
             form_id=form_id,
             invoice=input_inv,
             credentials=credentials,
             requested_info_id=requested_info_id
-        ))
+        )), timeout=25.0)
         
         if isinstance(pay_result, PaymentVerificationNeeded):
             # 3D Secure / Bank SMS tasdiqlash talab qilindi
@@ -362,16 +387,16 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                 await asyncio.sleep(2)
                 try:
                     if not temp_client.is_connected():
-                        await temp_client.connect()
+                        await asyncio.wait_for(temp_client.connect(), timeout=8.0)
                     
-                    me_check = await temp_client.get_me()
+                    me_check = await asyncio.wait_for(temp_client.get_me(), timeout=8.0)
                     if getattr(me_check, 'premium', False):
                         logger.info("✅ 3D-Secure muvaffaqiyatli yakunlandi! me.premium == True")
                         verified = True
                         break
 
                     # Shuningdek @PremiumBot xabarlarini tekshirish
-                    p_msgs = await temp_client.get_messages(prem_bot_entity, limit=2)
+                    p_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=2), timeout=8.0)
                     for pm in p_msgs:
                         p_txt = getattr(pm, 'text', '') or ''
                         if any(w in p_txt.lower() for w in ['rahmat', 'thank', 'faollashtirildi', 'activated', 'receipt', 'чек']):
@@ -384,7 +409,10 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                     logger.debug(f"3DS tekshiruvida ogohlantirish: {chk_err}")
 
             if not verified:
-                await temp_client.disconnect()
+                try:
+                    await temp_client.disconnect()
+                except Exception:
+                    pass
                 database.update_order_status(order_id, 'cancelled')
                 await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
                 await status_callback(0, 6, "SMS tasdiqlanmadi", "❌ <b>Bank SMS kodi kiritilmadi yoki to'lov tasdiqlanmadi (vaqt tugadi).</b>\n\nBuyurtma bekor qilindi.", {"error": "3ds_timeout"})
@@ -395,7 +423,10 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     except Exception as e:
         logger.error(f"SendPaymentFormRequest xatosi: {e}")
-        await temp_client.disconnect()
+        try:
+            await temp_client.disconnect()
+        except Exception:
+            pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         await status_callback(0, 6, "To'lovda xatolik", f"❌ To'lovni amalga oshirib bo'lmadi: {e}", {"error": str(e)})
@@ -410,8 +441,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
 
     try:
         if not temp_client.is_connected():
-            await temp_client.connect()
-        await temp_client.send_message(prem_bot_entity, '/stop')
+            await asyncio.wait_for(temp_client.connect(), timeout=8.0)
+        await asyncio.wait_for(temp_client.send_message(prem_bot_entity, '/stop'), timeout=10.0)
         await asyncio.sleep(1.5)
     except Exception as e:
         logger.warning(f"/stop yuborishda ogohlantirish: {e}")
