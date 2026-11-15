@@ -244,51 +244,58 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     )
 
     proxy_conf = proxy_manager.get_telethon_proxy()
-    if proxy_conf:
-        logger.info(f"Yangi akkaunt uchun Proksi ulanmoqda: {proxy_conf[1]}:{proxy_conf[2]}")
-        temp_client = TelegramClient(
+    temp_client = None
+
+    async def _init_and_request_code(use_proxy: bool):
+        p_c = proxy_conf if use_proxy else None
+        if p_c:
+            logger.info(f"Yangi akkaunt uchun Proksi ulanmoqda: {p_c[1]}:{p_c[2]}")
+        else:
+            logger.info("Yangi akkaunt uchun to'g'ridan-to'g'ri (proxy-siz) ulanmoqda...")
+
+        tc = TelegramClient(
             StringSession(),
             config.API_ID,
             config.API_HASH,
-            proxy=proxy_conf,
+            proxy=p_c,
             receive_updates=False,
-            connection_retries=5,
+            connection_retries=3,
+            retry_delay=1,
+            timeout=10.0,
             auto_reconnect=True
         )
-    else:
-        temp_client = TelegramClient(
-            StringSession(),
-            config.API_ID,
-            config.API_HASH,
-            receive_updates=False,
-            connection_retries=5,
-            auto_reconnect=True
-        )
-
-    order_data["temp_client"] = temp_client
-    ctx["temp_client"] = temp_client
-
-    # temp_client uchun update_loop ni zararsizlantirish (crash va disconnect bo'lmasligi uchun)
-    async def _noop_updates():
-        while True:
-            await asyncio.sleep(3600)
-    temp_client._update_loop = _noop_updates
-
-    await asyncio.wait_for(temp_client.connect(), timeout=15.0)
+        await asyncio.wait_for(tc.connect(), timeout=12.0)
+        c_req = await asyncio.wait_for(tc.send_code_request(phone), timeout=15.0)
+        return tc, c_req.phone_code_hash
 
     try:
-        code_req = await asyncio.wait_for(temp_client.send_code_request(phone), timeout=20.0)
-        phone_code_hash = code_req.phone_code_hash
+        if proxy_conf:
+            try:
+                temp_client, phone_code_hash = await _init_and_request_code(use_proxy=True)
+            except Exception as proxy_err:
+                logger.warning(f"Proksi orqali Telegram kod so'rashda xatolik ({proxy_err}). To'g'ridan-to'g'ri ulanishga o'tilmoqda...")
+                if temp_client:
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
+                temp_client, phone_code_hash = await _init_and_request_code(use_proxy=False)
+        else:
+            temp_client, phone_code_hash = await _init_and_request_code(use_proxy=False)
+
+        order_data["temp_client"] = temp_client
+        ctx["temp_client"] = temp_client
         order_data["phone_code_hash"] = phone_code_hash
     except Exception as e:
         logger.error(f"Telegram kod so'rashda xatolik: {e}")
-        try:
-            await temp_client.disconnect()
-        except Exception:
-            pass
+        if temp_client:
+            try:
+                await temp_client.disconnect()
+            except Exception:
+                pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
-        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e), "order_id": order_id})
+        await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi: {e}", {"error": str(e), "order_id": order_id})
         return False, str(e)
 
     if order_data.get("is_cancelled"):
