@@ -2,8 +2,8 @@
 """
 Avtomatlashtirilgan Proksi va IP Rotatsiya Menejeri:
 - SOCKS5 / HTTP proksilarni Telethon va Smart Glocal ga ulash.
-- Har 1 daqiqada (yoki sozlangan vaqtda) IP manzilni avtomatik yangilash (Rotating Proxy).
-- Har bir yangi avto-xarid oldidan IP ni majburiy yangilash (Change IP URL orqali).
+- Har bir yangi avto-xarid oldidan IP ni majburiy yangilash (Session ID va Change IP URL orqali).
+- Fonda har 1 daqiqada (yoki sozlangan vaqtda) IP manzilni avtomatik yangilash (Rotating Proxy).
 """
 
 import asyncio
@@ -11,14 +11,18 @@ import logging
 import re
 import urllib.request
 import urllib.error
+import ssl
 import socks
 from urllib.parse import urlparse
+import uuid
 
 import database
 
 logger = logging.getLogger(__name__)
 
 _rotation_task = None
+_current_ip = None
+_current_session_id = uuid.uuid4().hex[:8]
 
 def is_proxy_enabled() -> bool:
     return database.get_setting("proxy_enabled", "false").lower() in ("true", "1", "yes")
@@ -36,91 +40,136 @@ def get_rotation_interval_seconds() -> int:
     except Exception:
         return 60
 
-def parse_proxy(proxy_str: str):
+def get_http_proxy_with_session() -> str:
     """
-    Proksi matnini (socks5://user:pass@host:port yoki host:port:user:pass)
-    Telethon formatiga o'tkazadi: (socks.SOCKS5, host, port, rdns, username, password)
+    HTTP/HTTPS so'rovlar (Smart Glocal va IP tekshirish) uchun
+    sessiya bo'yicha ajratilgan proksi havolasini qaytaradi.
     """
-    if not proxy_str:
+    raw = get_proxy_string()
+    if not raw:
         return None
 
-    # Agar protocol bo'lmasa, socks5 deb taxmin qilamiz
-    raw = proxy_str.strip()
+    # Agar protocol bo'lmasa, http deb hisoblaymiz
     if not re.match(r'^[a-zA-Z0-9]+:\/\/', raw):
-        # host:port:user:pass yoki host:port formati
-        parts = raw.split(':')
-        if len(parts) == 4:
-            host, port, user, pwd = parts
-            return (socks.SOCKS5, host, int(port), True, user, pwd)
-        elif len(parts) == 2:
-            host, port = parts
-            return (socks.SOCKS5, host, int(port), True, None, None)
-        raw = "socks5://" + raw
+        raw = "http://" + raw
 
     parsed = urlparse(raw)
-    scheme = (parsed.scheme or "socks5").lower()
-    
-    if "socks4" in scheme:
-        p_type = socks.SOCKS4
-    elif "http" in scheme:
-        p_type = socks.HTTP
-    else:
-        p_type = socks.SOCKS5
-
     host = parsed.hostname
-    port = parsed.port or (1080 if p_type != socks.HTTP else 8080)
+    port = parsed.port or 823
     user = parsed.username
-    password = parsed.password
+    pwd = parsed.password
 
     if not host:
         return None
 
-    return (p_type, host, port, True, user, password)
+    sess = _current_session_id or uuid.uuid4().hex[:8]
+    if user:
+        if "__session-" not in user:
+            user_sess = f"{user}__session-{sess}"
+        else:
+            user_sess = user
+        if pwd:
+            return f"http://{user_sess}:{pwd}@{host}:{port}"
+        return f"http://{user_sess}@{host}:{port}"
+    return f"http://{host}:{port}"
 
 def get_telethon_proxy():
     """Telethon TelegramClient uchun proksi sozlamasini qaytaradi"""
     if not is_proxy_enabled():
         return None
-    p_str = get_proxy_string()
-    if not p_str:
+    raw = get_proxy_string()
+    if not raw:
         return None
     try:
-        return parse_proxy(p_str)
+        if not re.match(r'^[a-zA-Z0-9]+:\/\/', raw):
+            raw = "socks5://" + raw
+
+        parsed = urlparse(raw)
+        scheme = (parsed.scheme or "socks5").lower()
+        p_type = socks.HTTP if "http" in scheme else socks.SOCKS5
+        host = parsed.hostname
+        port = parsed.port or (1080 if p_type != socks.HTTP else 8080)
+        user = parsed.username
+        password = parsed.password
+
+        sess = _current_session_id or uuid.uuid4().hex[:8]
+        if user and "__session-" not in user:
+            user = f"{user}__session-{sess}"
+
+        if not host:
+            return None
+        return (p_type, host, port, True, user, password)
     except Exception as e:
         logger.error(f"Proksi sozlamasini o'qishda xatolik: {e}")
         return None
 
-async def rotate_ip(reason: str = "avtomatik 1 daqiqalik davr") -> bool:
-    """
-    Mobil proksi provayderining Change IP (Rotatsiya) havolasini chaqirib,
-    IP manzilni majburiy ravishda yangilaydi.
-    """
-    rot_url = get_rotation_url()
-    if not rot_url:
-        logger.debug("IP rotatsiya URL manzili kiritilmagan.")
-        return False
+def fetch_current_ip_sync() -> str:
+    """Joriy tashqi IP manzilni aniqlaydi (proksi orqali yoki to'g'ridan-to'g'ri)"""
+    ctx = ssl.create_default_context()
+    if is_proxy_enabled():
+        p_url = get_http_proxy_with_session()
+        if p_url:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({'http': p_url, 'https': p_url}),
+                urllib.request.HTTPSHandler(context=ctx)
+            )
+        else:
+            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+    else:
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
-    logger.info(f"🔄 IP manzil yangilanmoqda ({reason})... Havola: {rot_url[:35]}...")
+    req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "Autonuberbot/1.0"})
+    with opener.open(req, timeout=8) as resp:
+        return resp.read().decode().strip()
+
+async def get_current_ip() -> str:
+    """Asinxron joriy IP manzilni olish"""
+    global _current_ip
     try:
         loop = asyncio.get_running_loop()
-        def _fetch():
-            req =urllib.request.Request(rot_url, headers={"User-Agent": "Autonuberbot/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.read().decode('utf-8', errors='ignore')
-
-        res_text = await loop.run_in_executor(None, _fetch)
-        logger.info(f"✅ IP muvaffaqiyatli yangilandi! Provayder javobi: {res_text[:120].strip()}")
-        # Modem IP o'zgarishi va barqarorlashishi uchun 4 soniya kutish
-        await asyncio.sleep(4)
-        return True
+        ip = await loop.run_in_executor(None, fetch_current_ip_sync)
+        if ip:
+            _current_ip = ip
+        return _current_ip or "Noma'lum"
     except Exception as e:
-        logger.warning(f"⚠️ IP rotatsiya havolasini chaqirishda ogohlantirish: {e}")
-        return False
+        logger.warning(f"IP manzilni aniqlashda ogohlantirish: {e}")
+        return _current_ip or "Noma'lum"
 
-async def trigger_rotation_before_purchase():
-    """Har bir yangi avto-xarid oldidan IP ni darhol yangilaydi"""
-    if is_proxy_enabled() and get_rotation_url():
-        await rotate_ip(reason="yangi premium buyurtmasi oldidan")
+async def rotate_ip(reason: str = "avtomatik") -> str:
+    """
+    IP manzilni yangilaydi:
+    1. Yangi session ID yaratadi (DataImpulse/Residential proksilar uchun yangi IP beradi).
+    2. Agar Change IP (Rotatsiya) URL mavjud bo'lsa, uni chaqiradi (Mobil proksilar uchun).
+    3. Yangilangan IP manzilni qaytaradi.
+    """
+    global _current_session_id, _current_ip
+    _current_session_id = uuid.uuid4().hex[:8]
+
+    rot_url = get_rotation_url()
+    if rot_url:
+        logger.info(f"🔄 Mobil proksi IP rotatsiya URL chaqirilmoqda ({reason})...")
+        try:
+            loop = asyncio.get_running_loop()
+            def _fetch_rot():
+                req = urllib.request.Request(rot_url, headers={"User-Agent": "Autonuberbot/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    return resp.read().decode('utf-8', errors='ignore')
+            await loop.run_in_executor(None, _fetch_rot)
+            await asyncio.sleep(4)
+        except Exception as e:
+            logger.warning(f"⚠️ IP rotatsiya havolasini chaqirishda ogohlantirish: {e}")
+
+    # Yangi IP ni aniqlash
+    new_ip = await get_current_ip()
+    logger.info(f"🔄 IP yangilandi: {new_ip} ({reason}, session: {_current_session_id})")
+    return new_ip
+
+async def trigger_rotation_before_purchase() -> str:
+    """Har bir yangi avto-xarid oldidan IP ni darhol yangilaydi va yangi IP qaytaradi"""
+    if is_proxy_enabled():
+        return await rotate_ip(reason="yangi premium buyurtmasi oldidan")
+    else:
+        return await get_current_ip()
 
 async def _auto_rotation_loop():
     """Har 1 daqiqada (yoki sozlangan vaqtda) fonda aylanib turuvchi rotatsiya sikli"""
@@ -129,7 +178,7 @@ async def _auto_rotation_loop():
         try:
             interval = get_rotation_interval_seconds()
             await asyncio.sleep(interval)
-            if is_proxy_enabled() and get_rotation_url():
+            if is_proxy_enabled():
                 await rotate_ip(reason=f"har {interval} soniyalik davriy yangilanish")
         except asyncio.CancelledError:
             logger.info("Proksi rotatsiya foni to'xtatildi.")
@@ -143,4 +192,3 @@ def start_background_rotation():
     global _rotation_task
     if _rotation_task is None or _rotation_task.done():
         _rotation_task = asyncio.create_task(_auto_rotation_loop())
-

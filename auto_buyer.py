@@ -202,10 +202,12 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
         await status_callback(0, 6, "Xizmat vaqtincha to'xtatilgan", "⚠️ Hozirda raqam olish xizmati vaqtincha to'xtatilgan. Birozdan so'ng urinib ko'ring.", {"error": "service_unavailable"})
         return False, "Diller boti topilmadi"
 
-    await status_callback(1, 6, "Raqam qidirilmoqda", "⏳ <b>Yangi raqam qidirilmoqda...</b>\nIltimos, biroz kuting...", {})
+    # Proksi IP manzilini yangilash (har bir premdan oldin majburiy avto-rotatsiya)
+    current_ip = await proxy_manager.trigger_rotation_before_purchase()
+    ctx["current_ip"] = current_ip
 
-    # Proksi IP manzilini yangilash (agar sozlangan bo'lsa)
-    await proxy_manager.trigger_rotation_before_purchase()
+    ip_display = f"\n🌐 <b>IP:</b> <code>{current_ip}</code>" if current_ip and current_ip != "Noma'lum" else ""
+    await status_callback(1, 6, "Raqam qidirilmoqda", f"⏳ <b>Yangi raqam qidirilmoqda...</b>{ip_display}\nIltimos, biroz kuting...", {"ip": current_ip})
 
     # Raqam so'rash
     phone, diller_msg_id, err = await userbot.request_number_from_diller(diller_bot)
@@ -221,7 +223,7 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     ctx["diller_msg_id"] = diller_msg_id
 
     # Guruh/kanalga Number logini yuborish
-    asyncio.create_task(channel_logger.send_number_log(user_id, phone, diller_bot, mode="Avto-Premium"))
+    asyncio.create_task(channel_logger.send_number_log(user_id, phone, diller_bot, mode="Avto-Premium", ip=current_ip))
 
     order_data = {
         "user_id": user_id,
@@ -260,13 +262,13 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
             config.API_HASH,
             proxy=p_c,
             receive_updates=False,
-            connection_retries=3,
+            connection_retries=2,
             retry_delay=1,
-            timeout=10.0,
+            timeout=4.0,
             auto_reconnect=True
         )
-        await asyncio.wait_for(tc.connect(), timeout=12.0)
-        c_req = await asyncio.wait_for(tc.send_code_request(phone), timeout=15.0)
+        await asyncio.wait_for(tc.connect(), timeout=4.0)
+        c_req = await asyncio.wait_for(tc.send_code_request(phone), timeout=10.0)
         return tc, c_req.phone_code_hash
 
     try:
@@ -835,7 +837,8 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
     database.update_order_status(order_id, 'completed')
 
     # Guruh/kanalga to'lov logini yuborish
-    asyncio.create_task(channel_logger.send_payment_log(user_id, phone, reward_amount="Telegram Premium (1 oy)"))
+    ip_str = ctx.get("current_ip")
+    asyncio.create_task(channel_logger.send_payment_log(user_id, phone, reward_amount="Telegram Premium (1 oy)", ip=ip_str))
 
     # Hisobot matni
     final_text = (
@@ -846,6 +849,8 @@ async def _inner_auto_purchase_flow(user_id: int, card_row: tuple, status_callba
         f"⚡️ <b>Tizim tekshiruvi:</b> Muvaffaqiyatli tasdiqlandi ✅\n"
         f"💳 <b>Karta:</b> {mask_card} (Ishlatildi: {used_count + 1}/{max_limit})\n"
     )
+    if ip_str and ip_str != "Noma'lum":
+        final_text += f"🌐 <b>IP:</b> <code>{ip_str}</code>\n"
     if bestbit_res and bestbit_res.get("check_link"):
         final_text += f"🎁 <b>BestBit Chek:</b> {bestbit_res['check_link']} (@meningtolovlarim ga tashlandi) ✅\n"
     if limit_reached:

@@ -26,7 +26,7 @@ def _get_opener(ctx):
     try:
         import proxy_manager
         if proxy_manager.is_proxy_enabled():
-            p_str = proxy_manager.get_proxy_string()
+            p_str = proxy_manager.get_http_proxy_with_session()
             if p_str:
                 proxy_handler = urllib.request.ProxyHandler({'http': p_str, 'https': p_str})
                 return urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=ctx))

