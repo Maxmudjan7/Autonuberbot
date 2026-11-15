@@ -98,14 +98,14 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
         await asyncio.sleep(2.5)
 
         # 3. 'Бонус спин' tugmasini bosish
-        spin_btn_clicked, _ = await click_button_with_text(client, bot_entity, ["Бонус спин", "бонус"])
+        spin_btn_clicked, _ = await click_button_with_text(client, bot_entity, ["Бонус спин", "бонус", "bonus spin", "bonus"])
         if not spin_btn_clicked:
             logger.warning(f"[{phone}] 'Бонус спин' tugmasi topilmadi yoki bosilmadi!")
 
         await asyncio.sleep(2.5)
 
         # 4. 'Крутить' tugmasini bosish
-        krutit_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить"])
+        krutit_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить", "spin", "roll"])
         if krutit_clicked:
             logger.info(f"[{phone}] 1-marta slot aylantirilmoqda, 4 soniya kutilmoqda...")
             await asyncio.sleep(4.5)
@@ -113,13 +113,13 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
             logger.warning(f"[{phone}] 'Крутить' tugmasi topilmadi!")
 
         # 5. 'Забрать спин' tugmasini bosish
-        zabrat_clicked, _ = await click_button_with_text(client, bot_entity, ["Забрать спин", "Забрать"])
+        zabrat_clicked, _ = await click_button_with_text(client, bot_entity, ["Забрать спин", "Забрать", "claim spin", "claim"])
         if zabrat_clicked:
             logger.info(f"[{phone}] 'Забрать спин' bosildi.")
             await asyncio.sleep(2.0)
 
         # 6. Yana 'Крутить' tugmasini bosish
-        krutit2_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить"])
+        krutit2_clicked, _ = await click_button_with_text(client, bot_entity, ["Крутить", "spin", "roll"])
         if krutit2_clicked:
             logger.info(f"[{phone}] 2-marta slot aylantirilmoqda, 4 soniya kutilmoqda...")
             await asyncio.sleep(4.5)
@@ -132,31 +132,31 @@ async def run_bestbit_flow(client: TelegramClient, phone: str) -> dict:
         await asyncio.sleep(2.5)
 
         # 8. 'Чеки' tugmasini bosish
-        cheki_clicked, _ = await click_button_with_text(client, bot_entity, ["Чеки"])
+        cheki_clicked, _ = await click_button_with_text(client, bot_entity, ["Чеки", "cheques", "checks", "чек", "check"])
         if not cheki_clicked:
             logger.warning(f"[{phone}] 'Чеки' tugmasi topilmadi!")
         await asyncio.sleep(2.0)
 
         # 9. 'Создать чек' tugmasini bosish
-        create_chk_clicked, _ = await click_button_with_text(client, bot_entity, ["Создать чек"])
+        create_chk_clicked, _ = await click_button_with_text(client, bot_entity, ["Создать чек", "create cheque", "create check", "create"])
         if not create_chk_clicked:
             logger.warning(f"[{phone}] 'Создать чек' tugmasi topilmadi!")
         await asyncio.sleep(2.0)
 
         # 10. Summa tanlashda 'Макс.' tugmasini bosish
-        max_sum_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс.", "Макс"])
+        max_sum_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс.", "Макс", "max.", "max"])
         if not max_sum_clicked:
             logger.warning(f"[{phone}] 'Макс.' summa tugmasi topilmadi!")
         await asyncio.sleep(2.0)
 
         # 11. Aktivatsiyalar sonida 'Макс. активаций' tugmasini bosish
-        max_act_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс. активаций", "Макс"])
+        max_act_clicked, _ = await click_button_with_text(client, bot_entity, ["Макс. активаций", "Макс", "max activations", "max"])
         if not max_act_clicked:
             logger.warning(f"[{phone}] 'Макс. активаций' tugmasi topilmadi!")
         await asyncio.sleep(3.0)
 
         # 12. 'Копировать' tugmasini bosib ko'rish va chek havolasini qidirish
-        await click_button_with_text(client, bot_entity, ["Копировать", "копировать"], max_wait=2)
+        await click_button_with_text(client, bot_entity, ["Копировать", "копировать", "copy", "copy link"], max_wait=2)
 
         check_link = None
         msgs = await client.get_messages(bot_entity, limit=4)

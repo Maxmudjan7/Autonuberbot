@@ -343,22 +343,63 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         ))
         
         if isinstance(pay_result, PaymentVerificationNeeded):
-            # 3D Secure / SMS tasdiqlash talab qilindi
+            # 3D Secure / Bank SMS tasdiqlash talab qilindi
             v_url = pay_result.url
+            logger.info(f"3D-Secure talab qilindi: {v_url}")
             await status_callback(
-                5, 6, "3D-Secure SMS tasdiqlash",
-                f"📩 <b>Bankdan SMS kod yuborildi!</b>\n\nIltimos, bankdan kelgan SMS kodni ushbu botga yozing:\n\nYoki havola orqali tasdiqlang: <a href='{v_url}'>3D-Secure havolasi</a>",
+                5, 6, "Bankdan SMS kod kutilmoqda",
+                (
+                    f"📩 <b>Bankdan SMS kod yuborildi!</b>\n\n"
+                    f"💳 To'lovni yakunlash uchun pastdagi <b>«🔐 3D-Secure orqali tasdiqlash»</b> tugmasini bosing va bankdan kelgan SMS kodni kiriting.\n\n"
+                    f"⏳ <i>Kutilmoqda (3 daqiqa)...</i>"
+                ),
                 {"needs_sms": True, "verification_url": v_url, "order_id": order_id}
             )
-            # Bu yerda SMS kod kiritilishi kutilishi mumkin
-            # Hozircha davom ettiramiz
+
+            # Foydalanuvchi havola orqali SMS kodni kiritishini kutamiz (180 soniya)
+            verified = False
+            for _ in range(90):
+                await asyncio.sleep(2)
+                try:
+                    if not temp_client.is_connected():
+                        await temp_client.connect()
+                    
+                    me_check = await temp_client.get_me()
+                    if getattr(me_check, 'premium', False):
+                        logger.info("✅ 3D-Secure muvaffaqiyatli yakunlandi! me.premium == True")
+                        verified = True
+                        break
+
+                    # Shuningdek @PremiumBot xabarlarini tekshirish
+                    p_msgs = await temp_client.get_messages(prem_bot_entity, limit=2)
+                    for pm in p_msgs:
+                        p_txt = getattr(pm, 'text', '') or ''
+                        if any(w in p_txt.lower() for w in ['rahmat', 'thank', 'faollashtirildi', 'activated', 'receipt', 'чек']):
+                            logger.info(f"✅ @PremiumBot to'lovni tasdiqladi: {p_txt[:50]}")
+                            verified = True
+                            break
+                    if verified:
+                        break
+                except Exception as chk_err:
+                    logger.debug(f"3DS tekshiruvida ogohlantirish: {chk_err}")
+
+            if not verified:
+                await temp_client.disconnect()
+                database.update_order_status(order_id, 'cancelled')
+                await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
+                await status_callback(0, 6, "SMS tasdiqlanmadi", "❌ <b>Bank SMS kodi kiritilmadi yoki to'lov tasdiqlanmadi (vaqt tugadi).</b>\n\nBuyurtma bekor qilindi.", {"error": "3ds_timeout"})
+                return False, "3D-Secure SMS tasdiqlanmadi"
+
         elif isinstance(pay_result, PaymentResult):
             logger.info("Telegram to'lovi to'g'ridan-to'g'ri muvaffaqiyatli o'tdi!")
 
     except Exception as e:
         logger.error(f"SendPaymentFormRequest xatosi: {e}")
-        # Ba'zi holatlarda to'lov o'tgan bo'ladi, davom ettiramiz
-        pass
+        await temp_client.disconnect()
+        database.update_order_status(order_id, 'cancelled')
+        await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
+        await status_callback(0, 6, "To'lovda xatolik", f"❌ To'lovni amalga oshirib bo'lmadi: {e}", {"error": str(e)})
+        return False, str(e)
 
     # 8. Muvaffaqiyat! @PremiumBot da /stop bosish (Avto-uzaytirishni bekor qilish)
     await status_callback(

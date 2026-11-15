@@ -688,8 +688,8 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
             kb = get_back_to_menu_keyboard()
         elif extra.get("needs_sms") and extra.get("verification_url"):
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔗 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
-                [InlineKeyboardButton(text="Menyu", callback_data="back_to_main_menu")]
+                [InlineKeyboardButton(text="🔐 3D-Secure orqali tasdiqlash", url=extra["verification_url"])],
+                [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main_menu")]
             ])
 
         try:
