@@ -217,7 +217,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                     raise conn_err
                 await asyncio.sleep(2)
         
-        # Javoblar va to'lov chekini (Invoice) qidirish (Aynan 1 oylik obuna tanlanadi!)
+        # Javoblar va to'lov chekini (Invoice) qidirish (Aynan 1 oylik: 35 990 UZS / ~$3.99)
         invoice_msg = None
         inv_title = "Telegram Premium (1 oy)"
         amount_fmt = "1 oylik"
@@ -236,46 +236,51 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
                 logger.warning(f"@PremiumBot xabarlarini olishda ogohlantirish: {get_err}")
                 continue
 
-            # 1-oylik obuna tugmasini qidirib bosish (12, 6, 3 oyliklar emas, aynan 1 oylik!)
-            btn_clicked_this_turn = False
-            for m in msgs:
-                if m.buttons:
-                    for row in m.buttons:
-                        for btn in row:
-                            b_text = (btn.text or "").lower()
-                            # 12, 6, 3 oyliklarni chetlab o'tib, aynan 1 oylikni aniqlaymiz
-                            if ("12" not in b_text and "6" not in b_text and "3" not in b_text) and any(w in b_text for w in ["1", "oy", "month", "мес", "monthly", "ежемесячно"]):
-                                logger.info(f"✅ @PremiumBot 1-oylik obuna tugmasi topildi: '{btn.text}'. Bosilmoqda...")
-                                try:
-                                    await asyncio.wait_for(btn.click(), timeout=8.0)
-                                    btn_clicked_this_turn = True
-                                    await asyncio.sleep(2.5)
-                                    break
-                                except Exception as btn_err:
-                                    logger.warning(f"Tugmani bosishda ogohlantirish: {btn_err}")
-                        if btn_clicked_this_turn:
-                            break
-                if btn_clicked_this_turn:
-                    break
-
-            if btn_clicked_this_turn:
-                # Tugma bosilgach, yangilangan xabarlarni qayta olamiz
-                try:
-                    msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=5), timeout=10.0)
-                except Exception:
-                    pass
-
-            # Invoice (to'lov cheki) qidirish
+            # 1. Mavjud xabarlar orasidan Invoice (to'lov cheki) qidirish
             for m in msgs:
                 if m.media and hasattr(m.media, 'title'):
-                    m_title = (getattr(m.media, 'title', '') or '').lower()
-                    # Agar invoice 12 oylik yoki yillik bo'lsa va hali 1-oylik tugmani bosish imkoni bo'lsa, kutamiz
-                    if ("12" in m_title or "annual" in m_title or "year" in m_title) and poll_idx < 3:
-                        continue
                     invoice_msg = m
                     break
 
             if invoice_msg:
+                inv_amount = getattr(invoice_msg.media, 'total_amount', 0)
+                inv_curr = getattr(invoice_msg.media, 'currency', 'USD')
+                inv_title = getattr(invoice_msg.media, 'title', '') or 'Telegram Premium'
+
+                # Agar kutilmaganda yillik tarif (annual) bo'lib qolgan bo'lsa (UZS da 100 000+ yoki USD da 15$+):
+                is_annual = (
+                    any(w in inv_title.lower() for w in ["year", "annual", "годов", "12"]) or
+                    (inv_curr == "UZS" and inv_amount > 10000000) or
+                    (inv_curr == "USD" and inv_amount > 1500)
+                )
+
+                if is_annual and poll_idx < 3:
+                    logger.warning(f"Invoice yillik tarifda chiqdi ({inv_amount} {inv_curr}). Oylikka o'tkazish qidirilmoqda...")
+                    monthly_btn_clicked = False
+                    for m in msgs:
+                        if m.buttons:
+                            for row in m.buttons:
+                                for btn in row:
+                                    b_txt = (btn.text or "").lower()
+                                    # Yillik emas, aynan oylikka o'tish tugmasi
+                                    if not any(w in b_txt for w in ["годов", "annual", "yearly", "yillik"]) and any(w in b_txt for w in ["перейти на месячную", "месячн", "monthly", "oylik"]):
+                                        logger.info(f"Oylik tarifga o'tish tugmasi bosilmoqda: '{btn.text}'")
+                                        try:
+                                            await asyncio.wait_for(btn.click(), timeout=8.0)
+                                            monthly_btn_clicked = True
+                                            await asyncio.sleep(2.5)
+                                            break
+                                        except Exception as click_e:
+                                            logger.warning(f"Oylik tugmasini bosishda xato: {click_e}")
+                                if monthly_btn_clicked:
+                                    break
+                        if monthly_btn_clicked:
+                            break
+                    if monthly_btn_clicked:
+                        invoice_msg = None
+                        continue
+
+                # 1 oylik invoice (35 990 UZS) tayyor!
                 break
 
         if not invoice_msg:
@@ -284,7 +289,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         inv_title = getattr(invoice_msg.media, 'title', 'Telegram Premium 1 oy')
         inv_amount = getattr(invoice_msg.media, 'total_amount', 0)
         inv_curr = getattr(invoice_msg.media, 'currency', 'USD')
-        amount_fmt = f"{inv_amount / 100:.2f} {inv_curr}" if inv_amount else "1 oylik"
+        amount_fmt = f"{inv_amount / 100:,.2f} {inv_curr}" if inv_amount else "1 oylik"
         logger.info(f"✅ Tanlangan Invoice: title='{inv_title}', amount={amount_fmt}")
 
         # To'lov formasini olish
