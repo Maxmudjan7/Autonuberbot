@@ -355,7 +355,7 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         logger.warning(f"Ism-familiyani tasdiqlashda ogohlantirish: {name_err}")
 
     cred_data = json.dumps({"token": token, "type": token_type})
-    credentials = InputPaymentCredentials(data=DataJSON(data=cred_data))
+    credentials = InputPaymentCredentials(data=DataJSON(data=cred_data), save=True)
 
     try:
         if not temp_client.is_connected():
@@ -429,7 +429,21 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
             pass
         database.update_order_status(order_id, 'cancelled')
         await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
-        await status_callback(0, 6, "To'lovda xatolik", f"❌ To'lovni amalga oshirib bo'lmadi: {e}", {"error": str(e)})
+        
+        err_str = str(e)
+        if "PAYMENT_FAILED" in err_str:
+            user_msg = (
+                "❌ <b>Bank tomonidan to'lov rad etildi (PAYMENT_FAILED)!</b>\n\n"
+                "💡 <b>Kuzatilishi mumkin bo'lgan sabablar:</b>\n"
+                "1️⃣ <b>Mablag' yetarli emas:</b> Karta hisobida yetarli mablag' (kamida 12$ yoki unga teng summa) mavjudligini tekshiring;\n"
+                "2️⃣ <b>Internet to'lovlari o'chirilgan:</b> Bank mobil ilovasida (Alliance Mobile) internet xaridlari yoqilganligini tekshiring;\n"
+                "3️⃣ <b>Kunlik limit:</b> Kartaning internet operatsiyalari uchun limiti kam bo'lishi mumkin.\n\n"
+                "Iltimos, kartangizni tekshirib qayta urinib ko'ring yoki boshqa karta qo'shing."
+            )
+        else:
+            user_msg = f"❌ To'lovni amalga oshirib bo'lmadi: {err_str}"
+
+        await status_callback(0, 6, "To'lovda xatolik", user_msg, {"error": str(e)})
         return False, str(e)
 
     # 8. Muvaffaqiyat! @PremiumBot da /stop bosish (Avto-uzaytirishni bekor qilish)

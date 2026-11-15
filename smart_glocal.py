@@ -70,7 +70,11 @@ def tokenize_card(payment_url: str, card_number: str, exp_month: str, exp_year: 
     clean_year = str(exp_year)[-2:] if len(str(exp_year)) >= 2 else str(exp_year)
     clean_cvv = re.sub(r'\D', '', str(cvv))
 
+    card_holder_upper = (cardholder_name or "TELEGRAM USER").strip().upper()
+
     country_code, _ = get_bin_info(clean_pan, hash_val, sign_val)
+    if not country_code:
+        country_code = "uz" if clean_pan.startswith(("8600", "9860", "4916", "5300", "4073")) else "us"
 
     url = f"{SMART_GLOCAL_BASE}/api/apm/tokenize/{hash_val}/{sign_val}?country={country_code}"
     
@@ -89,15 +93,15 @@ def tokenize_card(payment_url: str, card_number: str, exp_month: str, exp_year: 
                 "expirationMonth": clean_month,
                 "expirationYear": clean_year,
                 "securityCode": clean_cvv,
-                "cardholderName": cardholder_name or "TELEGRAM USER"
+                "cardholderName": card_holder_upper
             }
         },
         "customerDetails": {
             "email": "user@gmail.com",
-            "postalCode": "10001",
-            "state": "NY",
-            "city": "New York",
-            "street": "Broadway 12"
+            "country": country_code.upper(),
+            "postalCode": "100000" if str(country_code).lower() == "uz" else "10001",
+            "city": "Tashkent" if str(country_code).lower() == "uz" else "New York",
+            "street": "Amir Temur 1" if str(country_code).lower() == "uz" else "Broadway 12"
         }
     }
 
