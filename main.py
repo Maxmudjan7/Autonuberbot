@@ -623,13 +623,18 @@ async def handle_get_number_auto(event: types.Message | types.CallbackQuery):
     active_order = database.get_active_order_for_user(user_id)
     if active_order:
         warn_text = (
-            f"⚠️ Sizda allaqachon faol raqam mavjud: <code>{active_order[2]}</code>\n"
+            f"⚠️ Sizda allaqachon faol raqam mavjud: <code>{active_order[2]}</code>\n\n"
             f"Iltimos, avval ushbu raqamni yakunlang yoki bekor qiling."
         )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="❌ Ushbu raqamni bekor qilish", callback_data=f"cancel_{active_order[0]}"))
+        builder.row(InlineKeyboardButton(text="🧊 Muzlatish", callback_data=f"freeze_{active_order[0]}"))
+        builder.row(InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main"))
+        kb = builder.as_markup()
         if is_callback:
-            await event.message.edit_text(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.message.edit_text(warn_text, parse_mode="HTML", reply_markup=kb)
         else:
-            await event.answer(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.answer(warn_text, parse_mode="HTML", reply_markup=kb)
         return
 
     # Faol to'lov kartasini tekshirish
@@ -713,13 +718,18 @@ async def handle_get_number_manual(event: types.Message | types.CallbackQuery):
     active_order = database.get_active_order_for_user(user_id)
     if active_order:
         warn_text = (
-            f"⚠️ Sizda allaqachon faol raqam mavjud: <code>{active_order[2]}</code>\n"
+            f"⚠️ Sizda allaqachon faol raqam mavjud: <code>{active_order[2]}</code>\n\n"
             f"Iltimos, avval ushbu raqamni yakunlang yoki bekor qiling."
         )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="❌ Ushbu raqamni bekor qilish", callback_data=f"cancel_{active_order[0]}"))
+        builder.row(InlineKeyboardButton(text="🧊 Muzlatish", callback_data=f"freeze_{active_order[0]}"))
+        builder.row(InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_to_main"))
+        kb = builder.as_markup()
         if is_callback:
-            await event.message.edit_text(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.message.edit_text(warn_text, parse_mode="HTML", reply_markup=kb)
         else:
-            await event.answer(warn_text, parse_mode="HTML", reply_markup=get_back_to_menu_keyboard())
+            await event.answer(warn_text, parse_mode="HTML", reply_markup=kb)
         return
 
     diller_bot = database.get_active_diller_bot()

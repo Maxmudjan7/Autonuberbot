@@ -110,6 +110,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     except Exception as e:
         logger.error(f"Telegram kod so'rashda xatolik: {e}")
         await temp_client.disconnect()
+        database.update_order_status(order_id, 'cancelled')
+        await userbot.click_diller_button(diller_bot, diller_msg_id, "Cancel")
         await status_callback(0, 6, "Kod so'rashda xatolik", f"❌ Telegramga kod so'rovini yuborib bo'lmadi. Birozdan so'ng urinib ko'ring.", {"error": str(e)})
         return False, str(e)
 
@@ -171,6 +173,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     except Exception as e:
         logger.error(f"Akkauntga login xatosi: {e}")
         await temp_client.disconnect()
+        database.update_order_status(order_id, 'cancelled')
+        await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         await status_callback(0, 6, "Kirishda xatolik", f"❌ Akkauntga kirib bo'lmadi: {e}", {"error": str(e)})
         return False, str(e)
 
@@ -253,6 +257,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     except Exception as e:
         logger.error(f"@PremiumBot bilan ishlashda xatolik: {e}")
         await temp_client.disconnect()
+        database.update_order_status(order_id, 'cancelled')
+        await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         await status_callback(0, 6, "@PremiumBot xatosi", f"❌ @PremiumBot bilan ishlashda xatolik: {e}", {"error": str(e)})
         return False, str(e)
 
@@ -291,6 +297,8 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
     if not tok_res.get("success"):
         err_msg = tok_res.get("error", "Karta rad etildi")
         await temp_client.disconnect()
+        database.update_order_status(order_id, 'cancelled')
+        await userbot.click_diller_button(diller_bot, diller_msg_id, "Freeze")
         
         # Limit tekshiruvi
         if any(w in err_msg.lower() for w in ['limit', 'rad etildi', 'exceeded']):

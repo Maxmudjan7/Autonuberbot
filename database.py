@@ -387,6 +387,20 @@ def get_active_order_for_user(user_id: int):
     cursor = conn.cursor()
     cursor.execute("SELECT id, user_id, phone_number, code, diller_bot_username, diller_msg_id, status, created_at, expires_at, userbot_id, password FROM orders WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (user_id,))
     row = cursor.fetchone()
+    if row:
+        expires_at_str = row[8]
+        if expires_at_str:
+            try:
+                from datetime import datetime
+                # ISO format yoki bo'sh joyli formatni tekshirish
+                exp_clean = expires_at_str.replace(" ", "T")
+                exp_dt = datetime.fromisoformat(exp_clean)
+                if datetime.now() > exp_dt:
+                    cursor.execute("UPDATE orders SET status = 'expired' WHERE id = ?", (row[0],))
+                    conn.commit()
+                    row = None
+            except Exception:
+                pass
     conn.close()
     return row
 
