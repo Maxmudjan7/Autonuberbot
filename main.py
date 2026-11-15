@@ -16,6 +16,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
