@@ -484,32 +484,73 @@ async def run_auto_purchase_flow(user_id: int, card_row: tuple, status_callback)
         if not temp_client.is_connected():
             await asyncio.wait_for(temp_client.connect(), timeout=8.0)
         await asyncio.wait_for(temp_client.send_message(prem_bot_entity, '/stop'), timeout=10.0)
+        logger.info("🛑 @PremiumBot ga /stop yuborildi.")
         await asyncio.sleep(0.8)
 
-        # /stop dan keyingi tasdiqlash tugmalarini bosish (2 bosqichli tasdiq)
-        for conf_step in range(2):
-            await asyncio.sleep(0.6)
-            try:
-                stop_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=3), timeout=6.0)
-                btn_clicked = False
-                for sm in stop_msgs:
-                    if sm.buttons:
-                        for row in sm.buttons:
-                            for btn in row:
-                                b_txt = (btn.text or "").lower()
-                                # Obunani to'xtatishni tasdiqlash tugmalari:
-                                if any(w in b_txt for w in ["отмен", "stop", "to'xtat", "bekor", "да", "yes", "подтверд", "confirm"]):
-                                    logger.info(f"🛑 @PremiumBot avto-uzaytirishni bekor qilish tugmasi #{conf_step+1} bosildi: '{btn.text}'")
-                                    await asyncio.wait_for(btn.click(), timeout=6.0)
-                                    btn_clicked = True
-                                    await asyncio.sleep(0.8)
-                                    break
-                            if btn_clicked:
+        # 1-bosqich: "Да, отменить продление" tugmasini bosish
+        step1_clicked = False
+        try:
+            stop_msgs = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=3), timeout=6.0)
+            for sm in stop_msgs:
+                if sm.buttons:
+                    for row in sm.buttons:
+                        for btn in row:
+                            b_txt = (btn.text or "").lower()
+                            if any(w in b_txt for w in ["отменить продление", "отменить", "stop renewal", "cancel renewal", "bekor qilish"]):
+                                logger.info(f"🛑 @PremiumBot 1-bosqich: '{btn.text}' bosilmoqda...")
+                                await asyncio.wait_for(btn.click(), timeout=6.0)
+                                step1_clicked = True
                                 break
-                    if btn_clicked:
-                        break
-            except Exception as conf_err:
-                logger.debug(f"/stop tasdiqlash bosqichida ogohlantirish: {conf_err}")
+                        if step1_clicked:
+                            break
+                if step1_clicked:
+                    break
+        except Exception as e1:
+            logger.warning(f"Stop 1-bosqich xatosi: {e1}")
+
+        if not step1_clicked:
+            # Agar tugma orqali bosilmasa, matn ko'rinishida yuboramiz
+            try:
+                logger.info("🛑 @PremiumBot ga 'Да, отменить продление' matni yuborilmoqda...")
+                await asyncio.wait_for(temp_client.send_message(prem_bot_entity, "Да, отменить продление"), timeout=6.0)
+                step1_clicked = True
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.8)
+
+        # 2-bosqich: "Слишком дорого" tugmasini bosish
+        step2_clicked = False
+        try:
+            stop_msgs2 = await asyncio.wait_for(temp_client.get_messages(prem_bot_entity, limit=3), timeout=6.0)
+            for sm in stop_msgs2:
+                if sm.buttons:
+                    for row in sm.buttons:
+                        for btn in row:
+                            b_txt = (btn.text or "").lower()
+                            if any(w in b_txt for w in ["слишком дорого", "дорого", "too expensive", "expensive", "qimmat"]):
+                                logger.info(f"🛑 @PremiumBot 2-bosqich: '{btn.text}' bosilmoqda...")
+                                await asyncio.wait_for(btn.click(), timeout=6.0)
+                                step2_clicked = True
+                                break
+                        if step2_clicked:
+                            break
+                if step2_clicked:
+                    break
+        except Exception as e2:
+            logger.warning(f"Stop 2-bosqich xatosi: {e2}")
+
+        if not step2_clicked:
+            # Agar tugma orqali bosilmasa, matn ko'rinishida yuboramiz
+            try:
+                logger.info("🛑 @PremiumBot ga 'Слишком дорого' matni yuborilmoqda...")
+                await asyncio.wait_for(temp_client.send_message(prem_bot_entity, "Слишком дорого"), timeout=6.0)
+                step2_clicked = True
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.8)
+        logger.info("✅ @PremiumBot da avto-uzaytirish to'liq bekor qilindi (/stop -> Да, отменить продление -> Слишком дорого).")
     except Exception as e:
         logger.warning(f"/stop yuborishda ogohlantirish: {e}")
 
