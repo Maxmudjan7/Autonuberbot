@@ -184,6 +184,22 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
             messages = await c.get_messages(entity, limit=4)
             for msg in messages:
                 if msg.id > sent_msg.id and msg.text:
+                    m_txt_lower = msg.text.lower()
+
+                    # 1. Eski buyurtma yopilgani yoki bekor qilingani haqidagi xabarlarni o'tkazib yuboramiz
+                    if any(w in m_txt_lower for w in [
+                        "order closed", "cancelled and returned", "number cancelled",
+                        "frozen successfully", "number frozen", "bekor qilindi",
+                        "muzlatildi", "notfound", "not found"
+                    ]):
+                        logger.info(f"Diller oldingi buyurtma statusi xabari o'tkazib yuborildi: {msg.text.strip()[:60]}")
+                        continue
+
+                    # 2. Diller bot ruxsat yo'q yoki boshqa sabab qaytarsa darhol xabar berish
+                    if any(w in m_txt_lower for w in ["ruxsat yo'q", "ruxsat yo‘q", "admin:", "balans", "kelishuv"]):
+                        logger.warning(f"Diller bot ({diller_username}) ogohlantirishi: {msg.text.strip()}")
+                        return None, None, f"Diller bot ({diller_username}): {msg.text.strip()}"
+
                     lines = msg.text.split("\n")
                     phone = None
                     for line in lines:
@@ -199,12 +215,6 @@ async def request_number_from_diller(diller_username: str, command: str = "/getN
                     if match_all:
                         phone = match_all.group(1).replace("+", "").strip()
                         return phone, msg.id, None
-
-                    # Diller bot ruxsat yo'q yoki boshqa sabab qaytarsa darhol xabar berish
-                    m_txt_lower = msg.text.lower()
-                    if any(w in m_txt_lower for w in ["ruxsat yo'q", "ruxsat yo‘q", "admin:", "balans", "kelishuv"]):
-                        logger.warning(f"Diller bot ({diller_username}) ogohlantirishi: {msg.text.strip()}")
-                        return None, None, f"Diller bot ({diller_username}): {msg.text.strip()}"
 
         return None, None, "Hozirda bo'sh raqamlar mavjud emas."
     except Exception as e:
@@ -285,7 +295,14 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
         entity = await c.get_input_entity(diller_username)
         msg = await c.get_messages(entity, ids=diller_msg_id)
         if not msg:
-            return False, "Diller botdagi xabar topilmadi!"
+            # Agar id bo'yicha topilmasa, oxirgi xabarlardan qidiramiz
+            recent = await c.get_messages(entity, limit=3)
+            for rm in recent:
+                if rm.buttons:
+                    msg = rm
+                    break
+            if not msg:
+                return False, "Diller botdagi xabar topilmadi!"
 
         # Agar Get Code so'ralgan bo'lsa va xabarda allaqachon kod mavjud bo'lsa
         if "code" in button_action.lower():
@@ -294,68 +311,90 @@ async def click_diller_button(diller_username: str, diller_msg_id: int, button_a
                 return True, (c_now, p_now)
 
         clicked = False
-        if msg.buttons:
-            for row in msg.buttons:
-                for btn in row:
-                    btn_text = btn.text.lower()
-                    if button_action.lower() in btn_text:
-                        await btn.click()
-                        clicked = True
-                        break
-                    if "code" in button_action.lower() and any(k in btn_text for k in ["code", "kod", "получить"]):
-                        await btn.click()
-                        clicked = True
-                        break
-                if clicked:
-                    break
+        action_map = {
+            "code": ["code", "kod", "получить", "again", "qayta"],
+            "freeze": ["freeze", "muzlat"],
+            "cancel": ["cancel", "bekor", "отмен"]
+        }
+        target_kws = action_map.get(button_action.lower(), [button_action.lower()])
 
-        if not clicked:
-            action_map = {
-                "code": ["code", "kod", "получить"],
-                "freeze": ["freeze", "muzlat"],
-                "cancel": ["cancel", "bekor", "отмен"]
-            }
-            target_kws = action_map.get(button_action.lower(), [button_action.lower()])
-            if msg.buttons:
-                for row in msg.buttons:
+        # Tugmani bosish (msg yoki oxirgi xabarlar ichidan)
+        candidate_msgs = [msg]
+        try:
+            more_msgs = await c.get_messages(entity, limit=3)
+            for mm in more_msgs:
+                if mm.id != msg.id and mm.buttons:
+                    candidate_msgs.append(mm)
+        except Exception:
+            pass
+
+        target_btn_msg = msg
+        for cmsg in candidate_msgs:
+            if cmsg.buttons:
+                for row in cmsg.buttons:
                     for btn in row:
                         btn_text = btn.text.lower()
                         if any(kw in btn_text for kw in target_kws):
+                            logger.info(f"Diller botida '{btn.text}' tugmasi bosilmoqda (msg #{cmsg.id})...")
                             await btn.click()
                             clicked = True
+                            target_btn_msg = cmsg
                             break
                     if clicked:
                         break
+            if clicked:
+                break
 
         if not clicked and "code" not in button_action.lower():
             return False, f"Diller botida '{button_action}' tugmasi topilmadi."
 
+        # Agar bu "Get Code" bo'lsa: kod kelguniga qadar kutamiz va "Get code again" tugmasini bosib turamiz
         if "code" in button_action.lower():
-            for _ in range(80):
-                await asyncio.sleep(0.4)
+            target_msg_id = target_btn_msg.id
+            for attempt in range(25):  # 25 * 1.5s = ~37 soniya kutamiz (FloodWait bo'lmaydi)
+                await asyncio.sleep(1.5)
                 if not c.is_connected():
                     try:
                         await c.connect()
                     except Exception:
                         pass
-                
-                # 1. Asosiy diller xabarini tekshirish (diller_msg_id)
-                updated_msg = await c.get_messages(entity, ids=diller_msg_id)
+
+                # 1. Asosiy diller xabarini tekshirish
+                updated_msg = await c.get_messages(entity, ids=target_msg_id)
                 if updated_msg and updated_msg.text:
                     code, password = extract_code_and_password(updated_msg.text, expected_phone=expected_phone)
                     if code:
-                        logger.info(f"Diller xabaridan (#{diller_msg_id}) kod olindi: {code}")
+                        logger.info(f"Diller xabaridan (#{target_msg_id}) kod olindi: {code}")
                         return True, (code, password)
 
-                # 2. Yangi kelgan xabarlarni tekshirish (FAQAT diller_msg_id dan KEYINGI xabarlar!)
-                new_msgs = await c.get_messages(entity, min_id=diller_msg_id, limit=4)
+                # 2. Yangi kelgan xabarlarni tekshirish (diller_msg_id dan keyingi xabarlar)
+                new_msgs = await c.get_messages(entity, limit=3)
                 for m in new_msgs:
-                    if not m or not m.text or m.id <= diller_msg_id:
+                    if not m or not m.text:
                         continue
                     code, password = extract_code_and_password(m.text, expected_phone=expected_phone)
                     if code:
                         logger.info(f"Diller yangi xabaridan (#{m.id}) kod olindi: {code}")
                         return True, (code, password)
+
+                # 3. Agar kod hali chiqmagan bo'lsa, "Get code again" / "Qayta kod olish" tugmasini qayta bosamiz!
+                poll_msg = updated_msg or (new_msgs[0] if new_msgs else None)
+                if poll_msg and poll_msg.buttons:
+                    for row in poll_msg.buttons:
+                        btn_clicked = False
+                        for btn in row:
+                            b_text = btn.text.lower()
+                            if any(k in b_text for k in ["again", "qayta", "code", "kod"]):
+                                try:
+                                    logger.info(f"Diller botida kodni qayta so'rash tugmasi bosilmoqda: '{btn.text}' (attempt {attempt+1})")
+                                    await btn.click()
+                                    target_msg_id = poll_msg.id
+                                    btn_clicked = True
+                                    break
+                                except Exception as e_click:
+                                    logger.warning(f"Qayta kod tugmasini bosishda ogohlantirish: {e_click}")
+                        if btn_clicked:
+                            break
 
             return False, "Diller botidan kod kelmadi. Iltimos, «🔄 Qayta kod olish» tugmasini bosing."
 
